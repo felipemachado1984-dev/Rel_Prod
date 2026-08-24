@@ -21,10 +21,9 @@ class ReportScreen extends StatelessWidget {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Cabeçalho
               pw.Container(
                 width: double.infinity,
-                padding: pw EdgeInsets.all(20),
+                padding: pw.EdgeInsets.all(20),
                 decoration: pw.BoxDecoration(
                   color: PdfColors.blue900,
                   borderRadius: pw.BorderRadius.circular(8),
@@ -41,13 +40,13 @@ class ReportScreen extends StatelessWidget {
                     pw.SizedBox(height: 8),
                     pw.Row(
                       children: [
-                        pw.Text('🏭 Máquina ${producao.maquina}',
+                        pw.Text('Maquina ${producao.maquina}',
                             style: pw.TextStyle(color: PdfColors.white)),
                         pw.SizedBox(width: 16),
-                        pw.Text('📅 ${producao.data}',
+                        pw.Text('${producao.data}',
                             style: pw.TextStyle(color: PdfColors.white)),
                         pw.SizedBox(width: 16),
-                        pw.Text('👤 ${producao.operador}',
+                        pw.Text('${producao.operador}',
                             style: pw.TextStyle(color: PdfColors.white)),
                       ],
                     ),
@@ -55,18 +54,16 @@ class ReportScreen extends StatelessWidget {
                 ),
               ),
               pw.SizedBox(height: 16),
-              // Tabela
               pw.Table(
                 border: pw.TableBorder.all(color: PdfColors.grey300),
                 children: [
-                  // Header
                   pw.TableRow(
                     decoration: pw.BoxDecoration(color: PdfColors.grey200),
                     children: [
                       'Campo', 'T1', 'T2', 'T3', 'T4',
                       'T1', 'T2', 'T3', 'T4'
                     ].map((h) => pw.Padding(
-                      padding: pw EdgeInsets.all(4),
+                      padding: pw.EdgeInsets.all(4),
                       child: pw.Text(h,
                           style: pw.TextStyle(
                             fontSize: 10,
@@ -74,49 +71,46 @@ class ReportScreen extends StatelessWidget {
                           )),
                     )).toList(),
                   ),
-                  // Dados
                   for (int i = 1; i <= 6; i++) ...[
                     pw.TableRow(
                       decoration: pw.BoxDecoration(color: PdfColors.grey100),
                       children: [
                         pw.Padding(
-                          padding: pw EdgeInsets.all(4),
-                          child: pw.Text('Posição $i',
+                          padding: pw.EdgeInsets.all(4),
+                          child: pw.Text('Posicao $i',
                               style: pw.TextStyle(
                                   fontWeight: pw.FontWeight.bold)),
                         ),
                         for (int j = 0; j < 8; j++)
-                          pw.Padding(padding: pw EdgeInsets.all(4)),
+                          pw.Padding(padding: pw.EdgeInsets.all(4)),
                       ],
                     ),
-                    // Tempo rompido
                     pw.TableRow(
                       children: [
                         pw.Padding(
-                          padding: pw EdgeInsets.all(4),
+                          padding: pw.EdgeInsets.all(4),
                           child: pw.Text('Tempo rompido (min)',
                               style: pw.TextStyle(fontSize: 9)),
                         ),
                         ...producao.posicoes[i]!.tempoRompido.map((v) =>
                           pw.Padding(
-                            padding: pw EdgeInsets.all(4),
-                            child: pw.Text(v.isEmpty ? '—' : v,
+                            padding: pw.EdgeInsets.all(4),
+                            child: pw.Text(v.isEmpty ? '-' : v,
                                 style: pw.TextStyle(fontSize: 10)),
                           )),
                       ],
                     ),
-                    // Bobinas
                     pw.TableRow(
                       children: [
                         pw.Padding(
-                          padding: pw EdgeInsets.all(4),
+                          padding: pw.EdgeInsets.all(4),
                           child: pw.Text('Bobinas Cheias',
                               style: pw.TextStyle(fontSize: 9)),
                         ),
                         ...producao.posicoes[i]!.bobinasCheias.map((v) =>
                           pw.Padding(
-                            padding: pw EdgeInsets.all(4),
-                            child: pw.Text(v.isEmpty ? '—' : v,
+                            padding: pw.EdgeInsets.all(4),
+                            child: pw.Text(v.isEmpty ? '-' : v,
                                 style: pw.TextStyle(fontSize: 10)),
                           )),
                       ],
@@ -135,14 +129,14 @@ class ReportScreen extends StatelessWidget {
     await file.writeAsBytes(await pdf.save());
 
     Share.shareXFiles([XFile(file.path)],
-        text: 'Relatório de Produção - Máquina ${producao.maquina}');
+        text: 'Relatorio de Producao - Maquina ${producao.maquina}');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Relatório'),
+        title: Text('Relatorio'),
         backgroundColor: Color(0xFF2563EB),
         foregroundColor: Colors.white,
       ),
@@ -154,7 +148,6 @@ class ReportScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Cabeçalho
                 Container(
                   width: double.infinity,
                   padding: EdgeInsets.all(16),
@@ -165,7 +158,7 @@ class ReportScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Relatório de Produção',
+                      Text('Relatorio de Producao',
                           style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -174,11 +167,11 @@ class ReportScreen extends StatelessWidget {
                       Wrap(
                         spacing: 16,
                         children: [
-                          Text('🏭 Máquina ${producao.maquina}',
+                          Text('Maquina ${producao.maquina}',
                               style: TextStyle(color: Colors.white)),
-                          Text('📅 ${producao.data}',
+                          Text('Data ${producao.data}',
                               style: TextStyle(color: Colors.white)),
-                          Text('👤 ${producao.operador}',
+                          Text('Operador ${producao.operador}',
                               style: TextStyle(color: Colors.white)),
                         ],
                       ),
@@ -186,7 +179,6 @@ class ReportScreen extends StatelessWidget {
                   ),
                 ),
                 SizedBox(height: 16),
-                // Tabela
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
@@ -206,7 +198,7 @@ class ReportScreen extends StatelessWidget {
                       for (int i = 1; i <= 6; i++) ...[
                         DataRow(
                           cells: [
-                            DataCell(Text('Posição $i',
+                            DataCell(Text('Posicao $i',
                                 style: TextStyle(fontWeight: FontWeight.bold))),
                             for (int j = 0; j < 8; j++)
                               DataCell(Text('')),
@@ -217,7 +209,7 @@ class ReportScreen extends StatelessWidget {
                             DataCell(Text('Tempo rompido',
                                 style: TextStyle(fontSize: 11))),
                             ...producao.posicoes[i]!.tempoRompido
-                                .map((v) => DataCell(Text(v.isEmpty ? '—' : v))),
+                                .map((v) => DataCell(Text(v.isEmpty ? '-' : v))),
                           ],
                         ),
                         DataRow(
@@ -225,7 +217,7 @@ class ReportScreen extends StatelessWidget {
                             DataCell(Text('Bobinas Cheias',
                                 style: TextStyle(fontSize: 11))),
                             ...producao.posicoes[i]!.bobinasCheias
-                                .map((v) => DataCell(Text(v.isEmpty ? '—' : v))),
+                                .map((v) => DataCell(Text(v.isEmpty ? '-' : v))),
                           ],
                         ),
                       ],
