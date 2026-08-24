@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 
 class OcrService {
   final TextRecognizer _recognizer =
@@ -23,6 +23,8 @@ class OcrService {
 
     final resultado = <String, List<String>>{};
 
+    final tempDir = await getTemporaryDirectory();
+
     for (int pos = 1; pos <= 6; pos++) {
       final y = baseY + espacamentoY * (pos - 1);
 
@@ -30,7 +32,7 @@ class OcrService {
       for (int col = 0; col < 8; col++) {
         final valor = await _reconhecerRegiao(
           image, imgW, imgH,
-          colunasX[col], y, larguraCol, alturaCampo,
+          colunasX[col], y, larguraCol, alturaCampo, tempDir,
         );
         tempoValores.add(valor);
       }
@@ -40,7 +42,7 @@ class OcrService {
       for (int col = 0; col < 8; col++) {
         final valor = await _reconhecerRegiao(
           image, imgW, imgH,
-          colunasX[col], y + offsetBobinas, larguraCol, alturaCampo,
+          colunasX[col], y + offsetBobinas, larguraCol, alturaCampo, tempDir,
         );
         bobinasValores.add(valor);
       }
@@ -53,6 +55,7 @@ class OcrService {
   Future<String> _reconhecerRegiao(
     img.Image fullImage, int imgW, int imgH,
     double xPercent, double yPercent, double wPercent, double hPercent,
+    Directory tempDir,
   ) async {
     const margin = 8;
 
@@ -67,24 +70,25 @@ class OcrService {
 
     final upscaled = img.copyResize(cropped, width: sw * 3, height: sh * 3);
 
-    final pngBytes = Uint8List.fromList(img.encodePng(upscaled));
+    final tempPath = '${tempDir.path}/crop_${DateTime.now().millisecondsSinceEpoch}.png';
+    final tempFile = File(tempPath);
+    await tempFile.writeAsBytes(img.encodePng(upscaled));
 
-    final inputImage = InputImage.fromBytes(
-      bytes: pngBytes,
-      metadata: InputImageMetadata(
-        size: Size(upscaled.width.toDouble(), upscaled.height.toDouble()),
-        rotation: InputImageRotation.rotation0deg,
-        format: InputImageFormat.png,
-        planeData: [],
-      ),
-    );
+    try {
+      final inputImage = InputImage.fromFilePath(tempPath);
+      final result = await _recognizer.processImage(inputImage);
 
-    final result = await _recognizer.processImage(inputImage);
+      final texto = result.text.trim();
+      final numeros = texto.replaceAll(RegExp(r'[^0-9]'), '');
 
-    final texto = result.text.trim();
-    final numeros = texto.replaceAll(RegExp(r'[^0-9]'), '');
-
-    return numeros;
+      return numeros;
+    } catch (e) {
+      return '';
+    } finally {
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+    }
   }
 
   void dispose() {
