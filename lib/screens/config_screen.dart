@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../models/producao.dart';
 import '../services/ocr_service.dart';
 import 'review_screen.dart';
@@ -14,9 +15,15 @@ class ConfigScreen extends StatefulWidget {
 class _ConfigScreenState extends State<ConfigScreen> {
   late CameraController _cam;
   late Future<void> _initFuture;
+  final TextRecognizer _recognizer =
+      TextRecognizer(script: TextRecognitionScript.latin);
   final OcrService _ocr = OcrService();
   bool _busy = false;
   bool _ready = false;
+  bool _isDetecting = false;
+  int _numDetected = 0;
+  CameraDescription? _camDesc;
+  int _lastProcessTime = 0;
 
   @override
   void initState() {
@@ -31,15 +38,82 @@ class _ConfigScreenState extends State<ConfigScreen> {
       (c) => c.lensDirection == CameraLensDirection.back,
       orElse: () => cams.first,
     );
-    _cam = CameraController(back, ResolutionPreset.high, enableAudio: false);
+    _camDesc = back;
+    _cam = CameraController(
+      back,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.nv21,
+    );
     _initFuture = _cam.initialize();
     await _initFuture;
-    if (mounted) setState(() => _ready = true);
+    if (mounted) {
+      setState(() => _ready = true);
+      _cam.startImageStream(_processFrame);
+    }
+  }
+
+  Future<void> _processFrame(CameraImage image) async {
+    if (_isDetecting || _busy) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastProcessTime < 800) return;
+    _lastProcessTime = now;
+
+    _isDetecting = true;
+    try {
+      final inputImage = _toInputImage(image);
+      if (inputImage == null) {
+        _isDetecting = false;
+        return;
+      }
+
+      final result = await _recognizer.processImage(inputImage);
+
+      int count = 0;
+      for (final block in result.blocks) {
+        for (final line in block.lines) {
+          count += RegExp(r'\d+').allMatches(line.text).length;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _numDetected = count;
+        });
+      }
+    } catch (e) {
+      // ignora erros de frame
+    } finally {
+      _isDetecting = false;
+    }
+  }
+
+  InputImage? _toInputImage(CameraImage image) {
+    try {
+      final bytes = image.planes[0].bytes;
+      final rotation = InputImageRotation.values.firstWhere(
+        (r) => r.rawValue == (_camDesc?.sensorOrientation ?? 0),
+        orElse: () => InputImageRotation.rotation0deg,
+      );
+      return InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: InputImageFormat.nv21,
+          bytesPerRow: image.planes[0].bytesPerRow,
+        ),
+      );
+    } catch (e) {
+      return null;
+    }
   }
 
   @override
   void dispose() {
     _cam.dispose();
+    _recognizer.close();
     _ocr.dispose();
     super.dispose();
   }
@@ -47,8 +121,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
   Future<void> _foto() async {
     if (_busy) return;
     setState(() => _busy = true);
+
     try {
-      await _initFuture;
+      await _cam.stopImageStream();
+    } catch (e) {
+      // ignora
+    }
+
+    try {
       final XFile f = await _cam.takePicture();
       if (!mounted) return;
 
@@ -58,35 +138,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
       );
 
       if (cropped == null) {
-        setState(() => _busy = false);
+        if (mounted) {
+          setState(() => _busy = false);
+          _cam.startImageStream(_processFrame);
+        }
         return;
       }
 
-      // Roda OCR pra verificar quantos numeros detectou
       final res = await _ocr.extrairValores(cropped);
       if (!mounted) return;
 
-      final numCount = res.allNumbers.length;
-
-      // Mostra tela de verificacao
-      final confirmar = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-          builder: (c) => VerificacaoScreen(
-            imagePath: cropped,
-            numDetectados: numCount,
-            rawText: res.rawText,
-          ),
-        ),
-      );
-
-      if (confirmar != true) {
-        // Usuario quer refazer a foto
-        setState(() => _busy = false);
-        return;
-      }
-
-      // Usuario confirmou - monta a producao
       final prod = Producao(
         maquina: '1',
         data: DateTime.now().toString().substring(0, 10),
@@ -157,12 +218,21 @@ class _ConfigScreenState extends State<ConfigScreen> {
         SnackBar(content: Text('Erro: $e')),
       );
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        try {
+          _cam.startImageStream(_processFrame);
+        } catch (e) {
+          // ignora
+        }
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final pronto = _numDetected >= 48;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Capturar Relatorio'),
@@ -175,6 +245,49 @@ class _ConfigScreenState extends State<ConfigScreen> {
               children: [
                 Positioned.fill(child: CameraPreview(_cam)),
                 Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: Container(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: pronto
+                          ? Colors.green.withAlpha(220)
+                          : Colors.orange.withAlpha(220),
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          pronto ? Icons.check_circle : Icons.search,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          pronto
+                              ? 'PRONTO! $_numDetected numeros detectados'
+                              : '$_numDetected de 48 numeros detectados',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
                   bottom: 100,
                   left: 16,
                   right: 16,
@@ -185,7 +298,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      'Tire a foto do relatorio. Depois voce seleciona a area e verifica se todos os numeros foram lidos.',
+                      pronto
+                          ? 'Foto pronta para captura! Todos os numeros foram reconhecidos.'
+                          : 'Aproxime a camera ate detectar todos os 48 numeros.',
                       style: TextStyle(color: Colors.white, fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
@@ -218,144 +333,18 @@ class _ConfigScreenState extends State<ConfigScreen> {
           color: Color(0xFF1E3A5F),
           child: ElevatedButton.icon(
             onPressed: _busy ? null : _foto,
-            icon: Icon(Icons.camera_alt),
-            label: Text('Tirar Foto', style: TextStyle(fontSize: 16)),
+            icon: Icon(pronto ? Icons.check : Icons.camera_alt),
+            label: Text(
+              pronto ? 'Tirar Foto (Pronto!)' : 'Tirar Foto',
+              style: TextStyle(fontSize: 16),
+            ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFF2563EB),
+              backgroundColor: pronto ? Colors.green : Color(0xFF2563EB),
               foregroundColor: Colors.white,
               padding: EdgeInsets.symmetric(vertical: 16),
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ===== TELA DE VERIFICACAO =====
-class VerificacaoScreen extends StatelessWidget {
-  final String imagePath;
-  final int numDetectados;
-  final String rawText;
-
-  VerificacaoScreen({
-    required this.imagePath,
-    required this.numDetectados,
-    required this.rawText,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pronto = numDetectados >= 48;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Verificar Foto'),
-        backgroundColor: Color(0xFF2563EB),
-        foregroundColor: Colors.white,
-      ),
-      body: Column(
-        children: [
-          // Imagem recortada
-          Expanded(
-            flex: 3,
-            child: Container(
-              width: double.infinity,
-              margin: EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[400]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(imagePath),
-                  fit: BoxFit.contain,
-                ),
-              ),
-            ),
-          ),
-          // Badge de numeros detectados
-          Container(
-            width: double.infinity,
-            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            decoration: BoxDecoration(
-              color: pronto
-                  ? Colors.green.withAlpha(220)
-                  : Colors.orange.withAlpha(220),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  pronto ? Icons.check_circle : Icons.warning,
-                  color: Colors.white,
-                  size: 28,
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    pronto
-                        ? 'PRONTO! $numDetectados numeros detectados'
-                        : '$numDetectados de 48 numeros detectados',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (!pronto)
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Text(
-                'Dica: aproxime mais a camera ou melhore a iluminacao.',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          // Botoes
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context, false),
-                    icon: Icon(Icons.refresh),
-                    label: Text('Refazer Foto', style: TextStyle(fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      foregroundColor: Color(0xFF2563EB),
-                      side: BorderSide(color: Color(0xFF2563EB)),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(context, true),
-                    icon: Icon(pronto ? Icons.check : Icons.arrow_forward),
-                    label: Text(
-                      pronto ? 'Confirmar' : 'Usar Mesmo Assim',
-                      style: TextStyle(fontSize: 15),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: pronto ? Colors.green : Color(0xFF2563EB),
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
