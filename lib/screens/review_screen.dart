@@ -20,6 +20,8 @@ class ReviewScreen extends StatefulWidget {
 class _ReviewScreenState extends State<ReviewScreen> {
   late Producao producao;
   late TextEditingController _rawTextController;
+  late TextEditingController _maquinaController;
+  late TextEditingController _operadorController;
   final _tempoControllers = <int, List<TextEditingController>>{};
   final _bobinaControllers = <int, List<TextEditingController>>{};
 
@@ -28,12 +30,14 @@ class _ReviewScreenState extends State<ReviewScreen> {
     super.initState();
     producao = widget.producao;
     _rawTextController = TextEditingController(text: widget.rawText);
+    _maquinaController = TextEditingController(text: producao.maquina);
+    _operadorController = TextEditingController(text: producao.operador);
 
     for (int pos = 1; pos <= 6; pos++) {
       final dados = producao.posicoes[pos] ?? PosicaoData();
       _tempoControllers[pos] = [];
       _bobinaControllers[pos] = [];
-      for (int t = 0; t < 8; t++) {
+      for (int t = 0; t < 4; t++) {
         _tempoControllers[pos]!.add(
           TextEditingController(text: dados.tempoRompido[t]),
         );
@@ -47,6 +51,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
   @override
   void dispose() {
     _rawTextController.dispose();
+    _maquinaController.dispose();
+    _operadorController.dispose();
     for (final list in _tempoControllers.values) {
       for (final c in list) c.dispose();
     }
@@ -57,10 +63,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   void _salvarEAvancar() {
+    producao.maquina = _maquinaController.text.trim();
+    producao.operador = _operadorController.text.trim();
+
     for (int pos = 1; pos <= 6; pos++) {
       final tempo = <String>[];
       final bobinas = <String>[];
-      for (int t = 0; t < 8; t++) {
+      for (int t = 0; t < 4; t++) {
         tempo.add(_tempoControllers[pos]![t].text.trim());
         bobinas.add(_bobinaControllers[pos]![t].text.trim());
       }
@@ -94,6 +103,58 @@ class _ReviewScreenState extends State<ReviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ===== CAMPOS DE MAQUINA E OPERADOR =====
+            Card(
+              color: Colors.blue[50],
+              child: Padding(
+                padding: EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 80,
+                          child: Text('Maquina:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _maquinaController,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 80,
+                          child: Text('Operador:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _operadorController,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text('Data: ${producao.data}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
             // ===== DEBUG =====
             Container(
               width: double.infinity,
@@ -109,7 +170,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   Text('DEBUG: ${widget.debugNums.length} numeros extraidos',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   SizedBox(height: 4),
-                  Text('Esperado: 96 (8 turnos x 6 pos x 2 valores)',
+                  Text('Esperado: 48 (4 turnos x 6 pos x 2 valores)',
                       style: TextStyle(fontSize: 11, color: Colors.grey[700])),
                   SizedBox(height: 4),
                   Wrap(
@@ -193,7 +254,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
               ],
             ),
             Divider(),
-            for (int t = 0; t < 8; t++) ...[
+            for (int t = 0; t < 4; t++) ...[
               Row(
                 children: [
                   SizedBox(width: 50, child: Text('${t + 1}', style: TextStyle(fontSize: 12))),
