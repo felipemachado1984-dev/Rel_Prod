@@ -10,18 +10,56 @@ class OcrOverlayPainter extends CustomPainter {
   final List<OcrLineData> lines;
   final Size imageSize;
   final bool pronto;
+  final double boxSize;
 
   OcrOverlayPainter({
     required this.lines,
     required this.imageSize,
     this.pronto = false,
+    this.boxSize = 332,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // === Caixa guia 332x332 centralizada ===
+    final boxLeft = (size.width - boxSize) / 2;
+    final boxTop = (size.height - boxSize) / 2;
+    final guideRect = Rect.fromLTWH(boxLeft, boxTop, boxSize, boxSize);
+
+    // Fundo semi-transparente dentro da caixa
+    final boxBgPaint = Paint()
+      ..color = pronto ? Colors.green.withAlpha(30) : Colors.white.withAlpha(15);
+    canvas.drawRect(guideRect, boxBgPaint);
+
+    // Borda da caixa
+    final boxBorderPaint = Paint()
+      ..color = pronto ? Colors.green : Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = pronto ? 4 : 3;
+    canvas.drawRect(guideRect, boxBorderPaint);
+
+    // Cantos da caixa (estilo viewfinder)
+    final cornerPaint = Paint()
+      ..color = pronto ? Colors.green : Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5;
+    const cl = 30.0; // corner length
+    // Sup-esq
+    canvas.drawLine(Offset(boxLeft, boxTop), Offset(boxLeft + cl, boxTop), cornerPaint);
+    canvas.drawLine(Offset(boxLeft, boxTop), Offset(boxLeft, boxTop + cl), cornerPaint);
+    // Sup-dir
+    canvas.drawLine(Offset(boxLeft + boxSize, boxTop), Offset(boxLeft + boxSize - cl, boxTop), cornerPaint);
+    canvas.drawLine(Offset(boxLeft + boxSize, boxTop), Offset(boxLeft + boxSize, boxTop + cl), cornerPaint);
+    // Inf-esq
+    canvas.drawLine(Offset(boxLeft, boxTop + boxSize), Offset(boxLeft + cl, boxTop + boxSize), cornerPaint);
+    canvas.drawLine(Offset(boxLeft, boxTop + boxSize), Offset(boxLeft, boxTop + boxSize - cl), cornerPaint);
+    // Inf-dir
+    canvas.drawLine(Offset(boxLeft + boxSize, boxTop + boxSize), Offset(boxLeft + boxSize - cl, boxTop + boxSize), cornerPaint);
+    canvas.drawLine(Offset(boxLeft + boxSize, boxTop + boxSize), Offset(boxLeft + boxSize, boxTop + boxSize - cl), cornerPaint);
+
+    // === Overlays dos numeros (estilo Google Lens) ===
     if (imageSize == Size.zero || lines.isEmpty) return;
 
-    // BoxFit.cover: escala pra preencher tudo (corta o excesso)
     final sx = size.width / imageSize.width;
     final sy = size.height / imageSize.height;
     final scale = sx > sy ? sx : sy;
@@ -41,7 +79,6 @@ class OcrOverlayPainter extends CustomPainter {
       ..strokeWidth = 2;
 
     for (final line in lines) {
-      // Extrai apenas numeros da linha
       final nums = RegExp(r'\d+').allMatches(line.text).map((m) => m.group(0)!).join(' ');
       if (nums.isEmpty) continue;
 
@@ -52,11 +89,9 @@ class OcrOverlayPainter extends CustomPainter {
         oy + line.box.bottom * scale,
       );
 
-      // Caixa semi-transparente
       canvas.drawRect(rect, boxPaint);
       canvas.drawRect(rect, borderPaint);
 
-      // Label com os numeros
       final tp = TextPainter(
         text: TextSpan(
           text: nums,
