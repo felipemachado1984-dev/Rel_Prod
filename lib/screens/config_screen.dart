@@ -75,7 +75,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
       if (!mounted) return;
 
-      // Abre a tela de crop
       final croppedPath = await Navigator.push<String>(
         context,
         MaterialPageRoute(
@@ -90,31 +89,82 @@ class _ConfigScreenState extends State<ConfigScreen> {
         return;
       }
 
-      // Roda OCR na imagem recortada
       final resultado = await _ocrService.extrairValores(croppedPath);
 
       if (!mounted) return;
 
+      // Monta a producao tentando interpretar a estrutura da tabela
       final producao = Producao(
         maquina: '1',
         data: DateTime.now().toString().substring(0, 10),
         operador: 'Operador',
       );
 
-      int index = 0;
-      for (int pos = 1; pos <= 6; pos++) {
-        final tempo = <String>[];
-        final bobinas = <String>[];
-        for (int col = 0; col < 8; col++) {
-          tempo.add(index < resultado.allNumbers.length ? resultado.allNumbers[index] : '');
-          index++;
-          bobinas.add(index < resultado.allNumbers.length ? resultado.allNumbers[index] : '');
-          index++;
+      // O OCR retorna blocos com linhas. Cada linha da tabela tem:
+      // [posicao] [tempo1] [bobina1] [tempo2] [bobina2] ... [tempo8] [bobina8]
+      // Mas pode ter ruido. Vamos parsear linha por linha.
+      int posicaoAtual = 1;
+      for (final block in resultado.blocks) {
+        for (final line in block.lines) {
+          final lineText = line.text.trim();
+          // Extrai apenas os numeros da linha
+          final numeros = RegExp(r'\d+')
+              .allMatches(lineText)
+              .map((m) => m.group(0)!)
+              .toList();
+
+          // Se a linha tem pelo menos 5 numeros, provavelmente e uma linha de dados
+          if (numeros.length >= 5 && posicaoAtual <= 6) {
+            // Remove o primeiro numero se for o numero da posicao (1-6)
+            List<String> dados = numeros;
+            if (dados.isNotEmpty && int.tryParse(dados[0]) == posicaoAtual) {
+              dados = dados.sublist(1);
+            }
+
+            // Separa em pares tempo/bobina
+            final tempo = <String>[];
+            final bobinas = <String>[];
+            for (int i = 0; i < dados.length && i < 16; i++) {
+              if (i % 2 == 0) {
+                tempo.add(dados[i]);
+              } else {
+                bobinas.add(dados[i]);
+              }
+            }
+            // Completa com vazio se faltar
+            while (tempo.length < 8) tempo.add('');
+            while (bobinas.length < 8) bobinas.add('');
+
+            producao.posicoes[posicaoAtual] = PosicaoData(
+              tempoRompido: tempo,
+              bobinasCheias: bobinas,
+            );
+            posicaoAtual++;
+          }
         }
-        producao.posicoes[pos] = PosicaoData(
-          tempoRompido: tempo,
-          bobinasCheias: bobinas,
-        );
+      }
+
+      // Se nao conseguiu parsear nenhuma posicao, joga tudo em sequencia
+      if (producao.posicoes.isEmpty) {
+        int index = 0;
+        for (int pos = 1; pos <= 6; pos++) {
+          final tempo = <String>[];
+          final bobinas = <String>[];
+          for (int col = 0; col < 8; col++) {
+            tempo.add(index < resultado.allNumbers.length
+                ? resultado.allNumbers[index]
+                : '');
+            index++;
+            bobinas.add(index < resultado.allNumbers.length
+                ? resultado.allNumbers[index]
+                : '');
+            index++;
+          }
+          producao.posicoes[pos] = PosicaoData(
+            tempoRompido: tempo,
+            bobinasCheias: bobinas,
+          );
+        }
       }
 
       Navigator.pushReplacement(
@@ -188,7 +238,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   }
 }
 
-// ===== TELA DE CROP =====
+// ===== TELA DE CROP - OVERLAY TRANSPARENTE =====
 class CropScreen extends StatefulWidget {
   final String imagePath;
 
@@ -199,14 +249,13 @@ class CropScreen extends StatefulWidget {
 }
 
 class _CropScreenState extends State<CropScreen> {
-  // Retangulo de selecao (valores normalizados 0.0 a 1.0)
   double _rectLeft = 0.1;
   double _rectTop = 0.15;
   double _rectRight = 0.9;
   double _rectBottom = 0.85;
 
   bool _isDragging = false;
-  int _dragCorner = 0; // 0=mover, 1=sup-esq, 2=sup-dir, 3=inf-esq, 4=inf-dir
+  int _dragCorner = 0;
   Size _imageSize = Size.zero;
 
   @override
@@ -220,7 +269,8 @@ class _CropScreenState extends State<CropScreen> {
           TextButton(
             onPressed: _confirmarCrop,
             child: Text('Confirmar',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -233,7 +283,7 @@ class _CropScreenState extends State<CropScreen> {
               fit: BoxFit.contain,
             ),
           ),
-          // Overlay escuro com retangulo de selecao
+          // Overlay com 4 retangulos escuros (NAO cobre a area selecionada)
           Positioned.fill(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -258,7 +308,10 @@ class _CropScreenState extends State<CropScreen> {
                   },
                   child: CustomPaint(
                     painter: CropOverlayPainter(
-                      _rectLeft, _rectTop, _rectRight, _rectBottom,
+                      _rectLeft,
+                      _rectTop,
+                      _rectRight,
+                      _rectBottom,
                     ),
                     child: Container(),
                   ),
@@ -291,16 +344,20 @@ class _CropScreenState extends State<CropScreen> {
 
   int _detectarCanto(double dx, double dy) {
     const threshold = 0.08;
-    final distSupEsq = ((dx - _rectLeft).abs() + (dy - _rectTop).abs());
-    final distSupDir = ((dx - _rectRight).abs() + (dy - _rectTop).abs());
-    final distInfEsq = ((dx - _rectLeft).abs() + (dy - _rectBottom).abs());
-    final distInfDir = ((dx - _rectRight).abs() + (dy - _rectBottom).abs());
+    final distSupEsq =
+        ((dx - _rectLeft).abs() + (dy - _rectTop).abs());
+    final distSupDir =
+        ((dx - _rectRight).abs() + (dy - _rectTop).abs());
+    final distInfEsq =
+        ((dx - _rectLeft).abs() + (dy - _rectBottom).abs());
+    final distInfDir =
+        ((dx - _rectRight).abs() + (dy - _rectBottom).abs());
 
     if (distSupEsq < threshold) return 1;
     if (distSupDir < threshold) return 2;
     if (distInfEsq < threshold) return 3;
     if (distInfDir < threshold) return 4;
-    return 0; // mover
+    return 0;
   }
 
   void _atualizarRetangulo(double dx, double dy) {
@@ -308,7 +365,7 @@ class _CropScreenState extends State<CropScreen> {
     dy = dy.clamp(0.0, 1.0);
 
     switch (_dragCorner) {
-      case 0: // mover
+      case 0:
         final w = _rectRight - _rectLeft;
         final h = _rectBottom - _rectTop;
         _rectLeft = (dx - w / 2).clamp(0.0, 1.0 - w);
@@ -316,19 +373,19 @@ class _CropScreenState extends State<CropScreen> {
         _rectTop = (dy - h / 2).clamp(0.0, 1.0 - h);
         _rectBottom = _rectTop + h;
         break;
-      case 1: // sup-esq
+      case 1:
         _rectLeft = dx.clamp(0.0, _rectRight - 0.1);
         _rectTop = dy.clamp(0.0, _rectBottom - 0.1);
         break;
-      case 2: // sup-dir
+      case 2:
         _rectRight = dx.clamp(_rectLeft + 0.1, 1.0);
         _rectTop = dy.clamp(0.0, _rectBottom - 0.1);
         break;
-      case 3: // inf-esq
+      case 3:
         _rectLeft = dx.clamp(0.0, _rectRight - 0.1);
         _rectBottom = dy.clamp(_rectTop + 0.1, 1.0);
         break;
-      case 4: // inf-dir
+      case 4:
         _rectRight = dx.clamp(_rectLeft + 0.1, 1.0);
         _rectBottom = dy.clamp(_rectTop + 0.1, 1.0);
         break;
@@ -343,45 +400,46 @@ class _CropScreenState extends State<CropScreen> {
       final imgW = image.width;
       final imgH = image.height;
 
-      // Converte coordenadas normalizadas para pixels
-      // Assumindo BoxFit.contain (precisa considerar aspect ratio)
       final imageAspect = imgW / imgH;
       final screenAspect = _imageSize.width / _imageSize.height;
 
       int cropX, cropY, cropW, cropH;
 
       if (imageAspect > screenAspect) {
-        // Imagem mais larga que a tela - ajusta Y
         final scale = imgW / _imageSize.width;
-        final renderedH = imgH / scale * (_imageSize.width / imgW) * (_imageSize.height / (imgH * _imageSize.width / imgW));
+        final renderedH = _imageSize.width * imgH / imgW;
         final offsetY = (_imageSize.height - renderedH) / 2;
 
         cropX = (_rectLeft * _imageSize.width * scale).round();
-        cropW = ((_rectRight - _rectLeft) * _imageSize.width * scale).round();
-        cropY = ((_rectTop * _imageSize.height - offsetY) * scale * (imgH / renderedH / _imageSize.height * _imageSize.height)).round();
-        cropH = ((_rectBottom - _rectTop) * _imageSize.height * scale * (imgH / renderedH / _imageSize.height * _imageSize.height)).round();
+        cropW =
+            ((_rectRight - _rectLeft) * _imageSize.width * scale).round();
+        cropY = ((_rectTop * _imageSize.height - offsetY) * scale).round();
+        cropH = ((_rectBottom - _rectTop) * _imageSize.height * scale)
+            .round();
       } else {
-        // Imagem mais alta que a tela - ajusta X
         final scale = imgH / _imageSize.height;
-        final renderedW = imgW / scale;
+        final renderedW = _imageSize.height * imgW / imgH;
         final offsetX = (_imageSize.width - renderedW) / 2;
 
         cropX = ((_rectLeft * _imageSize.width - offsetX) * scale).round();
-        cropW = ((_rectRight - _rectLeft) * _imageSize.width * scale).round();
+        cropW =
+            ((_rectRight - _rectLeft) * _imageSize.width * scale).round();
         cropY = (_rectTop * _imageSize.height * scale).round();
-        cropH = ((_rectBottom - _rectTop) * _imageSize.height * scale).round();
+        cropH = ((_rectBottom - _rectTop) * _imageSize.height * scale)
+            .round();
       }
 
-      // Garante valores validos
       cropX = cropX.clamp(0, imgW - 1);
       cropY = cropY.clamp(0, imgH - 1);
       cropW = cropW.clamp(1, imgW - cropX);
       cropH = cropH.clamp(1, imgH - cropY);
 
-      final cropped = img.copyCrop(image, x: cropX, y: cropY, width: cropW, height: cropH);
+      final cropped =
+          img.copyCrop(image, x: cropX, y: cropY, width: cropW, height: cropH);
 
       final tempDir = await getTemporaryDirectory();
-      final cropPath = '${tempDir.path}/crop_${DateTime.now().millisecondsSinceEpoch}.png';
+      final cropPath =
+          '${tempDir.path}/crop_${DateTime.now().millisecondsSinceEpoch}.png';
       await File(cropPath).writeAsBytes(img.encodePng(cropped));
 
       Navigator.pop(context, cropPath);
@@ -393,7 +451,7 @@ class _CropScreenState extends State<CropScreen> {
   }
 }
 
-// ===== PAINTER DO OVERLAY =====
+// ===== PAINTER COM OVERLAY TRANSPARENTE =====
 class CropOverlayPainter extends CustomPainter {
   final double left, top, right, bottom;
 
@@ -404,14 +462,34 @@ class CropOverlayPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    // Fundo escuro
-    final paint = Paint()..color = Colors.black54;
-    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), paint);
-
-    // Area selecionada (transparente)
-    final clearPaint = Paint()..color = Colors.transparent;
     final rect = Rect.fromLTRB(left * w, top * h, right * w, bottom * h);
-    canvas.drawRect(rect, clearPaint..blendMode = BlendMode.clear);
+
+    // Desenha 4 retangulos escuros AO REDOR da area selecionada
+    // (em vez de cobrir tudo e tentar fazer buraco)
+    final darkPaint = Paint()..color = Colors.black.withAlpha(140);
+
+    // Topo
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, w, rect.top),
+      darkPaint,
+    );
+    // Base
+    canvas.drawRect(
+      Rect.fromLTWH(0, rect.bottom, w, h - rect.bottom),
+      darkPaint,
+    );
+    // Esquerda
+    canvas.drawRect(
+      Rect.fromLTWH(0, rect.top, rect.left, rect.height),
+      darkPaint,
+    );
+    // Direita
+    canvas.drawRect(
+      Rect.fromLTWH(rect.right, rect.top, w - rect.right, rect.height),
+      darkPaint,
+    );
+
+    // A AREA SELECIONADA FICA TOTALMENTE TRANSPARENTE
 
     // Bordas do retangulo
     final borderPaint = Paint()
@@ -420,36 +498,36 @@ class CropOverlayPainter extends CustomPainter {
       ..strokeWidth = 3;
     canvas.drawRect(rect, borderPaint);
 
-    // Cantos
+    // Cantos brancos
     final cornerPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
-    const cornerSize = 20.0;
+    const cornerSize = 24.0;
 
-    // Sup-esq
     canvas.drawRect(
-      Rect.fromLTWH(rect.left - 4, rect.top - 4, cornerSize, cornerSize),
+      Rect.fromLTWH(
+          rect.left - 6, rect.top - 6, cornerSize, cornerSize),
       cornerPaint,
     );
-    // Sup-dir
     canvas.drawRect(
-      Rect.fromLTWH(rect.right - cornerSize + 4, rect.top - 4, cornerSize, cornerSize),
+      Rect.fromLTWH(rect.right - cornerSize + 6, rect.top - 6,
+          cornerSize, cornerSize),
       cornerPaint,
     );
-    // Inf-esq
     canvas.drawRect(
-      Rect.fromLTWH(rect.left - 4, rect.bottom - cornerSize + 4, cornerSize, cornerSize),
+      Rect.fromLTWH(rect.left - 6,
+          rect.bottom - cornerSize + 6, cornerSize, cornerSize),
       cornerPaint,
     );
-    // Inf-dir
     canvas.drawRect(
-      Rect.fromLTWH(rect.right - cornerSize + 4, rect.bottom - cornerSize + 4, cornerSize, cornerSize),
+      Rect.fromLTWH(rect.right - cornerSize + 6,
+          rect.bottom - cornerSize + 6, cornerSize, cornerSize),
       cornerPaint,
     );
 
     // Linhas guia (tercos)
     final guidePaint = Paint()
-      ..color = Colors.white30
+      ..color = Colors.white.withAlpha(80)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     final thirdW = rect.width / 3;
@@ -470,5 +548,8 @@ class CropOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CropOverlayPainter old) =>
-      left != old.left || top != old.top || right != old.right || bottom != old.bottom;
+      left != old.left ||
+      top != old.top ||
+      right != old.right ||
+      bottom != old.bottom;
 }
