@@ -65,14 +65,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final prod = Producao(
         maquina: '1',
         data: DateTime.now().toString().substring(0, 10),
-        operador: 'Operador',
+        operador: '',
       );
 
-      // ===== PARSER: filtra rotulos e mapeia por turno =====
-      // Estrutura da tabela (cada linha = 1 turno):
-      // [turno_label] [P1tempo P1bob] [P2tempo P2bob] ... [P6tempo P6bob]
-      // = 1 rotulo + 12 dados = 13 numeros por linha
-      // Ou sem rotulo: 12 numeros por linha
+      // ===== PARSER: 4 turnos x 6 posicoes x 2 valores = 48 numeros =====
+      // Cada linha da tabela = 1 turno
+      // Estrutura: [turno_label] [P1t P1b] [P2t P2b] ... [P6t P6b]
+      // = 1 rotulo + 12 dados = 13 numeros por linha (ou 12 sem rotulo)
 
       final cleanNums = <String>[];
 
@@ -85,45 +84,21 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
           if (lineNums.isEmpty) continue;
 
-          // Se a linha tem 13 numeros e o primeiro e 1-8, remove o rotulo de turno
-          if (lineNums.length == 13) {
+          // Tenta remover rotulo de turno (1-4) se for o primeiro numero
+          // e a linha tiver 13 numeros (1 rotulo + 12 dados)
+          if (lineNums.length >= 12) {
             final first = int.tryParse(lineNums[0]);
-            if (first != null && first >= 1 && first <= 8) {
+            if (first != null && first >= 1 && first <= 4 && lineNums.length == 13) {
               cleanNums.addAll(lineNums.sublist(1));
             } else {
               cleanNums.addAll(lineNums);
             }
-          } else if (lineNums.length == 12) {
-            // 12 numeros = dados sem rotulo
+          } else if (lineNums.length >= 6) {
+            // Linha parcial, adiciona
             cleanNums.addAll(lineNums);
-          } else if (lineNums.length > 13) {
-            // Linha mesclada - tenta quebrar em chunks de 12
-            // Primeiro remove o rotulo se existir
-            int start = 0;
-            final first = int.tryParse(lineNums[0]);
-            if (first != null && first >= 1 && first <= 8) {
-              start = 1;
-            }
-            // Pega de 12 em 12
-            for (int i = start; i + 12 <= lineNums.length; i += 12) {
-              cleanNums.addAll(lineNums.sublist(i, i + 12));
-            }
-            // Sobra
-            final remaining = (lineNums.length - start) % 12;
-            if (remaining > 0) {
-              final offset = lineNums.length - remaining;
-              cleanNums.addAll(lineNums.sublist(offset));
-            }
-          } else if (lineNums.length >= 10) {
-            // Linha quase completa, adiciona
-            cleanNums.addAll(lineNums);
-          } else if (lineNums.length <= 4 && cleanNums.isNotEmpty) {
-            // Linha curta - pode ser rotulo de posicao ou cabecalho
-            // So adiciona se for continuacao de dados
-            final first = int.tryParse(lineNums[0]);
-            if (first != null && first >= 1 && first <= 6 && lineNums.length == 1) {
-              // Rotulo de posicao isolado - ignora
-            } else {
+          } else if (lineNums.length <= 2 && cleanNums.isNotEmpty) {
+            // Pode ser rotulo de posicao isolado - so adiciona se nao for 1-6 sozinho
+            if (!(lineNums.length == 1 && int.tryParse(lineNums[0]) != null && int.tryParse(lineNums[0])! >= 1 && int.tryParse(lineNums[0])! <= 6)) {
               cleanNums.addAll(lineNums);
             }
           } else {
@@ -132,13 +107,12 @@ class _ConfigScreenState extends State<ConfigScreen> {
         }
       }
 
-      // Se cleanNums tem mais de 96, trunca
-      // Se tem menos, usa o que tem
-      // Mapeia: turno * 12 + (pos-1) * 2
+      // Mapeia: 4 turnos x 12 valores por turno
+      // turno t (0-3), posicao p (1-6): index = t * 12 + (p-1) * 2
       for (int pos = 1; pos <= 6; pos++) {
-        final tempo = List<String>.filled(8, '');
-        final bob = List<String>.filled(8, '');
-        for (int turno = 0; turno < 8; turno++) {
+        final tempo = List<String>.filled(4, '');
+        final bob = List<String>.filled(4, '');
+        for (int turno = 0; turno < 4; turno++) {
           int i = turno * 12 + (pos - 1) * 2;
           if (i < cleanNums.length) tempo[turno] = cleanNums[i];
           if (i + 1 < cleanNums.length) bob[turno] = cleanNums[i + 1];
@@ -147,7 +121,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
             PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
       }
 
-      // Debug info: passa a lista de numeros extraidos pra tela de revisao
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
