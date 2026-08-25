@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../models/producao.dart';
 import '../services/ocr_service.dart';
+import '../widgets/ocr_overlay.dart';
 import 'review_screen.dart';
 import 'crop_screen.dart';
 
@@ -24,6 +25,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
   int _numDetected = 0;
   CameraDescription? _camDesc;
   int _lastProcessTime = 0;
+  List<OcrLineData> _overlays = [];
+  Size _rotatedSize = Size.zero;
 
   @override
   void initState() {
@@ -57,47 +60,26 @@ class _ConfigScreenState extends State<ConfigScreen> {
     if (_isDetecting || _busy) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastProcessTime < 800) return;
+    if (now - _lastProcessTime < 700) return;
     _lastProcessTime = now;
 
     _isDetecting = true;
     try {
-      final inputImage = _toInputImage(image);
-      if (inputImage == null) {
-        _isDetecting = false;
-        return;
-      }
-
-      final result = await _recognizer.processImage(inputImage);
-
-      int count = 0;
-      for (final block in result.blocks) {
-        for (final line in block.lines) {
-          count += RegExp(r'\d+').allMatches(line.text).length;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _numDetected = count;
-        });
-      }
-    } catch (e) {
-      // ignora erros de frame
-    } finally {
-      _isDetecting = false;
-    }
-  }
-
-  InputImage? _toInputImage(CameraImage image) {
-    try {
-      final bytes = image.planes[0].bytes;
       final rotation = InputImageRotation.values.firstWhere(
         (r) => r.rawValue == (_camDesc?.sensorOrientation ?? 0),
         orElse: () => InputImageRotation.rotation0deg,
       );
-      return InputImage.fromBytes(
-        bytes: bytes,
+
+      // Calcula tamanho rotacionado
+      if (rotation == InputImageRotation.rotation90deg ||
+          rotation == InputImageRotation.rotation270deg) {
+        _rotatedSize = Size(image.height.toDouble(), image.width.toDouble());
+      } else {
+        _rotatedSize = Size(image.width.toDouble(), image.height.toDouble());
+      }
+
+      final inputImage = InputImage.fromBytes(
+        bytes: image.planes[0].bytes,
         metadata: InputImageMetadata(
           size: Size(image.width.toDouble(), image.height.toDouble()),
           rotation: rotation,
@@ -105,8 +87,32 @@ class _ConfigScreenState extends State<ConfigScreen> {
           bytesPerRow: image.planes[0].bytesPerRow,
         ),
       );
+
+      final result = await _recognizer.processImage(inputImage);
+
+      int count = 0;
+      final newOverlays = <OcrLineData>[];
+
+      for (final block in result.blocks) {
+        for (final line in block.lines) {
+          final nums = RegExp(r'\d+').allMatches(line.text).length;
+          if (nums > 0) {
+            count += nums;
+            newOverlays.add(OcrLineData(line.boundingBox, line.text));
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _numDetected = count;
+          _overlays = newOverlays;
+        });
+      }
     } catch (e) {
-      return null;
+      // ignora
+    } finally {
+      _isDetecting = false;
     }
   }
 
@@ -124,18 +130,23 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     try {
       await _cam.stopImageStream();
-    } catch (e) {
-      // ignora
-    }
+    } catch (e) {}
 
     try {
       final XFile f = await _cam.takePicture();
       if (!mounted) return;
 
-      final cropped = await Navigator.push<String>(
-        context,
-        MaterialPageRoute(builder: (c) => CropScreen(imagePath: f.path)),
-      );
+      final pronto = _numDetected >= 48;
+      String? cropped;
+
+      if (pronto) {
+        cropped = f.path;
+      } else {
+        cropped = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(builder: (c) => CropScreen(imagePath: f.path)),
+        );
+      }
 
       if (cropped == null) {
         if (mounted) {
@@ -155,22 +166,17 @@ class _ConfigScreenState extends State<ConfigScreen> {
       );
 
       final cleanNums = <String>[];
-
       for (final block in res.blocks) {
         for (final line in block.lines) {
           final lineNums = RegExp(r'\d+')
               .allMatches(line.text)
               .map((m) => m.group(0)!)
               .toList();
-
           if (lineNums.isEmpty) continue;
 
           if (lineNums.length >= 12) {
             final first = int.tryParse(lineNums[0]);
-            if (first != null &&
-                first >= 1 &&
-                first <= 4 &&
-                lineNums.length == 13) {
+            if (first != null && first >= 1 && first <= 4 && lineNums.length == 13) {
               cleanNums.addAll(lineNums.sublist(1));
             } else {
               cleanNums.addAll(lineNums);
@@ -179,10 +185,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
             cleanNums.addAll(lineNums);
           } else if (lineNums.length <= 2 && cleanNums.isNotEmpty) {
             final first = int.tryParse(lineNums[0]);
-            if (!(lineNums.length == 1 &&
-                first != null &&
-                first >= 1 &&
-                first <= 6)) {
+            if (!(lineNums.length == 1 && first != null && first >= 1 && first <= 6)) {
               cleanNums.addAll(lineNums);
             }
           } else {
@@ -199,8 +202,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           if (i < cleanNums.length) tempo[turno] = cleanNums[i];
           if (i + 1 < cleanNums.length) bob[turno] = cleanNums[i + 1];
         }
-        prod.posicoes[pos] =
-            PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
+        prod.posicoes[pos] = PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
       }
 
       Navigator.pushReplacement(
@@ -222,9 +224,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         setState(() => _busy = false);
         try {
           _cam.startImageStream(_processFrame);
-        } catch (e) {
-          // ignora
-        }
+        } catch (e) {}
       }
     }
   }
@@ -243,14 +243,28 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ? Center(child: CircularProgressIndicator())
           : Stack(
               children: [
+                // Camera
                 Positioned.fill(child: CameraPreview(_cam)),
+
+                // Overlay com os numeros reconhecidos (estilo Google Lens)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: OcrOverlayPainter(
+                      lines: _overlays,
+                      imageSize: _rotatedSize,
+                      pronto: pronto,
+                    ),
+                    child: Container(),
+                  ),
+                ),
+
+                // Badge de contagem
                 Positioned(
                   top: 16,
                   left: 16,
                   right: 16,
                   child: Container(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     decoration: BoxDecoration(
                       color: pronto
                           ? Colors.green.withAlpha(220)
@@ -275,8 +289,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         SizedBox(width: 10),
                         Text(
                           pronto
-                              ? 'PRONTO! $_numDetected numeros detectados'
-                              : '$_numDetected de 48 numeros detectados',
+                              ? 'PRONTO! $_numDetected numeros'
+                              : '$_numDetected de 48 numeros',
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -287,6 +301,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     ),
                   ),
                 ),
+
+                // Dica
                 Positioned(
                   bottom: 100,
                   left: 16,
@@ -299,13 +315,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     ),
                     child: Text(
                       pronto
-                          ? 'Foto pronta para captura! Todos os numeros foram reconhecidos.'
-                          : 'Aproxime a camera ate detectar todos os 48 numeros.',
+                          ? 'Foto pronta! Vai direto para a revisao.'
+                          : 'Aproxime a camera ate detectar 48 numeros.',
                       style: TextStyle(color: Colors.white, fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
                   ),
                 ),
+
                 if (_busy)
                   Positioned.fill(
                     child: Container(
@@ -317,8 +334,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                             CircularProgressIndicator(color: Colors.white),
                             SizedBox(height: 12),
                             Text('Processando...',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 16)),
+                                style: TextStyle(color: Colors.white, fontSize: 16)),
                           ],
                         ),
                       ),
