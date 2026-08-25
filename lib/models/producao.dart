@@ -5,8 +5,8 @@ class PosicaoData {
   PosicaoData({
     List<String>? tempoRompido,
     List<String>? bobinasCheias,
-  })  : tempoRompido = tempoRompido ?? List.filled(8, ''),
-        bobinasCheias = bobinasCheias ?? List.filled(8, '');
+  })  : tempoRompido = tempoRompido ?? List.filled(4, ''),
+        bobinasCheias = bobinasCheias ?? List.filled(4, '');
 }
 
 class Producao {
