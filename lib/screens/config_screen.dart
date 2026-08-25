@@ -28,6 +28,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
   int _lastProcessTime = 0;
   List<OcrLineData> _overlays = [];
   Size _rotatedSize = Size.zero;
+  Size _screenSize = Size.zero;
+  static const double boxSize = 332;
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Future<void> _processFrame(CameraImage image) async {
     if (_isDetecting || _busy || _autoCaptureDone) return;
+    if (_screenSize == Size.zero) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastProcessTime < 700) return;
@@ -90,13 +93,43 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
       final result = await _recognizer.processImage(inputImage);
 
+      // === Calcular a caixa 332x332 no espaco da imagem ===
+      final sx = _screenSize.width / _rotatedSize.width;
+      final sy = _screenSize.height / _rotatedSize.height;
+      final scale = sx > sy ? sx : sy;
+
+      final rw = _rotatedSize.width * scale;
+      final rh = _rotatedSize.height * scale;
+      final ox = (_screenSize.width - rw) / 2;
+      final oy = (_screenSize.height - rh) / 2;
+
+      // Caixa na tela (centralizada)
+      final screenBoxLeft = (_screenSize.width - boxSize) / 2;
+      final screenBoxTop = (_screenSize.height - boxSize) / 2;
+      final screenBoxRight = screenBoxLeft + boxSize;
+      final screenBoxBottom = screenBoxTop + boxSize;
+
+      // Converter para coordenadas da imagem
+      final imgBoxLeft = (screenBoxLeft - ox) / scale;
+      final imgBoxTop = (screenBoxTop - oy) / scale;
+      final imgBoxRight = (screenBoxRight - ox) / scale;
+      final imgBoxBottom = (screenBoxBottom - oy) / scale;
+
       int count = 0;
       final newOverlays = <OcrLineData>[];
 
       for (final block in result.blocks) {
         for (final line in block.lines) {
           final nums = RegExp(r'\d+').allMatches(line.text).length;
-          if (nums > 0) {
+          if (nums == 0) continue;
+
+          // Centro da linha OCR
+          final cx = (line.boundingBox.left + line.boundingBox.right) / 2;
+          final cy = (line.boundingBox.top + line.boundingBox.bottom) / 2;
+
+          // Verifica se o centro esta dentro da caixa
+          if (cx >= imgBoxLeft && cx <= imgBoxRight &&
+              cy >= imgBoxTop && cy <= imgBoxBottom) {
             count += nums;
             newOverlays.add(OcrLineData(line.boundingBox, line.text));
           }
@@ -109,7 +142,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           _overlays = newOverlays;
         });
 
-        // AUTO-CAPTURA: exatamente 48 numeros -> tira foto sozinho
+        // AUTO-CAPTURA: exatamente 48 dentro da caixa
         if (count == 48 && !_autoCaptureDone && !_busy) {
           _autoCaptureDone = true;
           _foto();
@@ -247,128 +280,90 @@ class _ConfigScreenState extends State<ConfigScreen> {
       ),
       body: !_ready
           ? Center(child: CircularProgressIndicator())
-          : Stack(
-              children: [
-                Positioned.fill(child: CameraPreview(_cam)),
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                _screenSize = Size(constraints.maxWidth, constraints.maxHeight);
+                return Stack(
+                  children: [
+                    Positioned.fill(child: CameraPreview(_cam)),
 
-                // Overlay estilo Google Lens
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: OcrOverlayPainter(
-                      lines: _overlays,
-                      imageSize: _rotatedSize,
-                      pronto: pronto,
-                    ),
-                    child: Container(),
-                  ),
-                ),
-
-                // Badge de contagem
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: pronto
-                          ? Colors.green.withAlpha(220)
-                          : Colors.orange.withAlpha(220),
-                      borderRadius: BorderRadius.circular(30),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
+                    // Overlay estilo Google Lens + Caixa guia
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: OcrOverlayPainter(
+                          lines: _overlays,
+                          imageSize: _rotatedSize,
+                          pronto: pronto,
+                          boxSize: boxSize,
                         ),
-                      ],
+                        child: Container(),
+                      ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          pronto ? Icons.check_circle : Icons.search,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                        SizedBox(width: 10),
-                        Text(
-                          pronto
-                              ? 'PRONTO! 48 numeros - capturando...'
-                              : '$_numDetected de 48 numeros',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
 
-                // Dica
-                Positioned(
-                  bottom: 100,
-                  left: 16,
-                  right: 16,
-                  child: Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      pronto
-                          ? 'Captura automatica! Aguarde...'
-                          : _numDetected > 48
-                              ? 'Mais de 48 numeros detectados. Afaste um pouco a camera.'
-                              : 'Aponte para o relatorio. A foto sera tirada automaticamente quando detectar 48 numeros.',
-                      style: TextStyle(color: Colors.white, fontSize: 13),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-
-                if (_busy)
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black54,
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                    // Badge de contagem
+                    Positioned(
+                      top: 16,
+                      left: 16,
+                      right: 16,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: pronto
+                              ? Colors.green.withAlpha(220)
+                              : Colors.orange.withAlpha(220),
+                          borderRadius: BorderRadius.circular(30),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            CircularProgressIndicator(color: Colors.white),
-                            SizedBox(height: 12),
-                            Text('Processando...',
-                                style: TextStyle(color: Colors.white, fontSize: 16)),
+                            Icon(
+                              pronto ? Icons.check_circle : Icons.search,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              pronto
+                                  ? 'PRONTO! 48 numeros - capturando...'
+                                  : '$_numDetected de 48 na caixa',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          width: double.infinity,
-          padding: EdgeInsets.all(16),
-          color: Color(0xFF1E3A5F),
-          child: ElevatedButton.icon(
-            onPressed: (_busy || pronto) ? null : _foto,
-            icon: Icon(Icons.camera_alt),
-            label: Text(
-              pronto ? 'Capturando automaticamente...' : 'Tirar Foto Manual',
-              style: TextStyle(fontSize: 16),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFF2563EB),
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(vertical: 16),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+
+                    // Dica
+                    Positioned(
+                      bottom: 100,
+                      left: 16,
+                      right: 16,
+                      child: Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          pronto
+                              ? 'Captura automatica! Aguarde...'
+                              : 'Encaixe o relatorio dentro da caixa branca.',
+                          style: TextStyle(color: Colors.white, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+
+                    if (_busy)
+                      
