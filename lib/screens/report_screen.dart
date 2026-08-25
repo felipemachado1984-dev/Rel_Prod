@@ -1,9 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../models/producao.dart';
 
 class ReportScreen extends StatelessWidget {
@@ -11,231 +9,153 @@ class ReportScreen extends StatelessWidget {
 
   ReportScreen({required this.producao});
 
-  Future<void> _exportarPDF(BuildContext context) async {
-    final pdf = pw.Document();
-
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4.landscape,
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Container(
-                width: double.infinity,
-                padding: pw.EdgeInsets.all(20),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.blue900,
-                  borderRadius: pw.BorderRadius.circular(8),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text('Relatório de Produção',
-                        style: pw.TextStyle(
-                          fontSize: 18,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.white,
-                        )),
-                    pw.SizedBox(height: 8),
-                    pw.Row(
-                      children: [
-                        pw.Text('Maquina ${producao.maquina}',
-                            style: pw.TextStyle(color: PdfColors.white)),
-                        pw.SizedBox(width: 16),
-                        pw.Text('${producao.data}',
-                            style: pw.TextStyle(color: PdfColors.white)),
-                        pw.SizedBox(width: 16),
-                        pw.Text('${producao.operador}',
-                            style: pw.TextStyle(color: PdfColors.white)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 16),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey300),
-                children: [
-                  pw.TableRow(
-                    decoration: pw.BoxDecoration(color: PdfColors.grey200),
-                    children: [
-                      'Campo', 'T1', 'T2', 'T3', 'T4',
-                      'T1', 'T2', 'T3', 'T4'
-                    ].map((h) => pw.Padding(
-                      padding: pw.EdgeInsets.all(4),
-                      child: pw.Text(h,
-                          style: pw.TextStyle(
-                            fontSize: 10,
-                            fontWeight: pw.FontWeight.bold,
-                          )),
-                    )).toList(),
-                  ),
-                  for (int i = 1; i <= 6; i++) ...[
-                    pw.TableRow(
-                      decoration: pw.BoxDecoration(color: PdfColors.grey100),
-                      children: [
-                        pw.Padding(
-                          padding: pw.EdgeInsets.all(4),
-                          child: pw.Text('Posicao $i',
-                              style: pw.TextStyle(
-                                  fontWeight: pw.FontWeight.bold)),
-                        ),
-                        for (int j = 0; j < 8; j++)
-                          pw.Padding(padding: pw.EdgeInsets.all(4)),
-                      ],
-                    ),
-                    pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: pw.EdgeInsets.all(4),
-                          child: pw.Text('Tempo rompido (min)',
-                              style: pw.TextStyle(fontSize: 9)),
-                        ),
-                        ...producao.posicoes[i]!.tempoRompido.map((v) =>
-                          pw.Padding(
-                            padding: pw.EdgeInsets.all(4),
-                            child: pw.Text(v.isEmpty ? '-' : v,
-                                style: pw.TextStyle(fontSize: 10)),
-                          )),
-                      ],
-                    ),
-                    pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: pw.EdgeInsets.all(4),
-                          child: pw.Text('Bobinas Cheias',
-                              style: pw.TextStyle(fontSize: 9)),
-                        ),
-                        ...producao.posicoes[i]!.bobinasCheias.map((v) =>
-                          pw.Padding(
-                            padding: pw.EdgeInsets.all(4),
-                            child: pw.Text(v.isEmpty ? '-' : v,
-                                style: pw.TextStyle(fontSize: 10)),
-                          )),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/relatorio-maq${producao.maquina}.pdf');
-    await file.writeAsBytes(await pdf.save());
-
-    Share.shareXFiles([XFile(file.path)],
-        text: 'Relatorio de Producao - Maquina ${producao.maquina}');
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Relatorio'),
+        title: Text('Relatorio de Producao'),
         backgroundColor: Color(0xFF2563EB),
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),
-        child: Card(
-          child: Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Color(0xFF1E3A5F),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Relatorio de Producao',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white)),
-                      SizedBox(height: 8),
-                      Wrap(
-                        spacing: 16,
-                        children: [
-                          Text('Maquina ${producao.maquina}',
-                              style: TextStyle(color: Colors.white)),
-                          Text('Data ${producao.data}',
-                              style: TextStyle(color: Colors.white)),
-                          Text('Operador ${producao.operador}',
-                              style: TextStyle(color: Colors.white)),
-                        ],
-                      ),
-                    ],
-                  ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Cabecalho
+            Card(
+              color: Colors.blue[50],
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Relatorio de Producao',
+                        style: TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 8),
+                    Text('Maquina: ${producao.maquina}'),
+                    Text('Operador: ${producao.operador}'),
+                    Text('Data: ${producao.data}'),
+                  ],
                 ),
-                SizedBox(height: 16),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columnSpacing: 12,
-                    columns: [
-                      DataColumn(label: Text('Campo')),
-                      DataColumn(label: Text('T1')),
-                      DataColumn(label: Text('T2')),
-                      DataColumn(label: Text('T3')),
-                      DataColumn(label: Text('T4')),
-                      DataColumn(label: Text('T1')),
-                      DataColumn(label: Text('T2')),
-                      DataColumn(label: Text('T3')),
-                      DataColumn(label: Text('T4')),
-                    ],
-                    rows: [
-                      for (int i = 1; i <= 6; i++) ...[
-                        DataRow(
-                          cells: [
-                            DataCell(Text('Posicao $i',
-                                style: TextStyle(fontWeight: FontWeight.bold))),
-                            for (int j = 0; j < 8; j++)
-                              DataCell(Text('')),
-                          ],
-                        ),
-                        DataRow(
-                          cells: [
-                            DataCell(Text('Tempo rompido',
-                                style: TextStyle(fontSize: 11))),
-                            ...producao.posicoes[i]!.tempoRompido
-                                .map((v) => DataCell(Text(v.isEmpty ? '-' : v))),
-                          ],
-                        ),
-                        DataRow(
-                          cells: [
-                            DataCell(Text('Bobinas Cheias',
-                                style: TextStyle(fontSize: 11))),
-                            ...producao.posicoes[i]!.bobinasCheias
-                                .map((v) => DataCell(Text(v.isEmpty ? '-' : v))),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            SizedBox(height: 16),
+            // Tabela de cada posicao
+            for (int pos = 1; pos <= 6; pos++) ...[
+              _buildTabelaPosicao(pos),
+              SizedBox(height: 16),
+            ],
+            // Botao de compartilhar
+            SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () => _compartilhar(context),
+              icon: Icon(Icons.share),
+              label: Text('Compartilhar Relatorio'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _exportarPDF(context),
-        icon: Icon(Icons.picture_as_pdf),
-        label: Text('Exportar PDF'),
-        backgroundColor: Color(0xFF2563EB),
-        foregroundColor: Colors.white,
+    );
+  }
+
+  Widget _buildTabelaPosicao(int pos) {
+    final dados = producao.posicoes[pos] ?? PosicaoData();
+
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Posicao $pos',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Color(0xFF2563EB))),
+            SizedBox(height: 8),
+            // Cabecalho
+            Row(
+              children: [
+                Expanded(
+                    flex: 1,
+                    child: Text('Turno',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                Expanded(
+                    flex: 2,
+                    child: Text('Tempo Rompido',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                Expanded(
+                    flex: 2,
+                    child: Text('Bobinas Cheias',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+              ],
+            ),
+            Divider(),
+            // 4 linhas (turnos)
+            for (int t = 0; t < 4; t++)
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                        flex: 1,
+                        child: Text('${t + 1}', style: TextStyle(fontSize: 12))),
+                    Expanded(
+                        flex: 2,
+                        child: Text(dados.tempoRompido[t],
+                            style: TextStyle(fontSize: 12))),
+                    Expanded(
+                        flex: 2,
+                        child: Text(dados.bobinasCheias[t],
+                            style: TextStyle(fontSize: 12))),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _compartilhar(BuildContext context) async {
+    try {
+      final StringBuffer sb = StringBuffer();
+      sb.writeln('RELATORIO DE PRODUCAO');
+      sb.writeln('====================');
+      sb.writeln('Maquina: ${producao.maquina}');
+      sb.writeln('Operador: ${producao.operador}');
+      sb.writeln('Data: ${producao.data}');
+      sb.writeln();
+
+      for (int pos = 1; pos <= 6; pos++) {
+        final dados = producao.posicoes[pos] ?? PosicaoData();
+        sb.writeln('Posicao $pos:');
+        for (int t = 0; t < 4; t++) {
+          sb.writeln(
+              '  Turno ${t + 1}: Tempo=${dados.tempoRompido[t]}, Bobinas=${dados.bobinasCheias[t]}');
+        }
+        sb.writeln();
+      }
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/relatorio_producao.txt');
+      await file.writeAsString(sb.toString());
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: 'Relatorio de Producao ${producao.data}',
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao compartilhar: $e')),
+      );
+    }
   }
 }
