@@ -144,29 +144,55 @@ class _ConfigScreenState extends State<ConfigScreen> {
         }
       }
 
-      // Se nao conseguiu parsear nenhuma posicao, joga tudo em sequencia
-      if (producao.posicoes.isEmpty) {
-        int index = 0;
-        for (int pos = 1; pos <= 6; pos++) {
-          final tempo = <String>[];
-          final bobinas = <String>[];
-          for (int col = 0; col < 8; col++) {
-            tempo.add(index < resultado.allNumbers.length
-                ? resultado.allNumbers[index]
-                : '');
-            index++;
-            bobinas.add(index < resultado.allNumbers.length
-                ? resultado.allNumbers[index]
-                : '');
-            index++;
+           // ===== PARSER CORRIGIDO =====
+      // Estrutura: os numeros vem em pares sequenciais
+      // Par 1 -> Posicao 1 Turno 1 (tempo, bobina)
+      // Par 2 -> Posicao 2 Turno 1
+      // ...ate Posicao 6 Turno 1
+      // Par 7 -> Posicao 1 Turno 2
+      // ...ate Posicao 6 Turno 8
+      // Total: 48 pares = 96 numeros (6 posicoes x 8 turnos x 2 valores)
+
+      final nums = resultado.allNumbers;
+
+      final producao = Producao(
+        maquina: '1',
+        data: DateTime.now().toString().substring(0, 10),
+        operador: 'Operador',
+      );
+
+      for (int pos = 1; pos <= 6; pos++) {
+        final tempo = List<String>.filled(8, '');
+        final bobinas = List<String>.filled(8, '');
+
+        for (int turno = 0; turno < 8; turno++) {
+          // Calcula o indice no array plano
+          // Cada turno tem 6 posicoes x 2 valores = 12 numeros
+          final baseIndex = turno * 12 + (pos - 1) * 2;
+
+          if (baseIndex < nums.length) {
+            tempo[turno] = nums[baseIndex];
           }
-          producao.posicoes[pos] = PosicaoData(
-            tempoRompido: tempo,
-            bobinasCheias: bobinas,
-          );
+          if (baseIndex + 1 < nums.length) {
+            bobinas[turno] = nums[baseIndex + 1];
+          }
         }
+
+        producao.posicoes[pos] = PosicaoData(
+          tempoRompido: tempo,
+          bobinasCheias: bobinas,
+        );
       }
 
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ReviewScreen(
+            producao: producao,
+            rawText: resultado.rawText,
+          ),
+        ),
+      );
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
