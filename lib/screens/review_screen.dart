@@ -15,18 +15,62 @@ class ReviewScreen extends StatefulWidget {
 class _ReviewScreenState extends State<ReviewScreen> {
   late Producao producao;
   late TextEditingController _rawTextController;
+  final _tempoControllers = <int, TextEditingController>{};
+  final _bobinaControllers = <int, TextEditingController>{};
 
   @override
   void initState() {
     super.initState();
     producao = widget.producao;
     _rawTextController = TextEditingController(text: widget.rawText);
+
+    for (int pos = 1; pos <= 6; pos++) {
+      final dados = producao.posicoes[pos];
+      _tempoControllers[pos] = TextEditingController(
+        text: (dados?.tempoRompido ?? List.filled(8, '')).join(', '),
+      );
+      _bobinaControllers[pos] = TextEditingController(
+        text: (dados?.bobinasCheias ?? List.filled(8, '')).join(', '),
+      );
+    }
   }
 
   @override
   void dispose() {
     _rawTextController.dispose();
+    for (final c in _tempoControllers.values) c.dispose();
+    for (final c in _bobinaControllers.values) c.dispose();
     super.dispose();
+  }
+
+  void _salvarEAvancar() {
+    for (int pos = 1; pos <= 6; pos++) {
+      final tempo = _tempoControllers[pos]!.text
+          .split(',')
+          .map((e) => e.trim())
+          .toList();
+      final bobinas = _bobinaControllers[pos]!.text
+          .split(',')
+          .map((e) => e.trim())
+          .toList();
+      while (tempo.length < 8) tempo.add('');
+      while (bobinas.length < 8) bobinas.add('');
+
+      if (producao.posicoes[pos] != null) {
+        producao.posicoes[pos]!.tempoRompido = tempo;
+        producao.posicoes[pos]!.bobinasCheias = bobinas;
+      } else {
+        producao.posicoes[pos] =
+            PosicaoData(tempoRompido: tempo, bobinasCheias: bobinas);
+      }
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReportScreen(producao: producao),
+      ),
+    );
   }
 
   @override
@@ -42,54 +86,34 @@ class _ReviewScreenState extends State<ReviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Mostra o texto bruto reconhecido pelo OCR
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[400]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Texto reconhecido pelo OCR:',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  SizedBox(height: 8),
-                  TextField(
+            ExpansionTile(
+              title: Text('Texto reconhecido pelo OCR',
+                  style:
+                      TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: TextField(
                     controller: _rawTextController,
                     maxLines: 10,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: 'Nenhum texto reconhecido',
-                    ),
-                    style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                    decoration: InputDecoration(border: InputBorder.none),
+                    style: TextStyle(fontSize: 11, fontFamily: 'monospace'),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            SizedBox(height: 16),
-            // Tabela editavel
-            Text('Dados extraidos (editaveis):',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             SizedBox(height: 8),
-            for (int pos = 1; pos <= 6; pos++) ...[
-              _buildPosicaoEditor(pos),
-              SizedBox(height: 16),
-            ],
+            for (int pos = 1; pos <= 6; pos++) _buildPosicaoEditor(pos),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ReportScreen(producao: producao),
-            ),
-          );
-        },
+        onPressed: _salvarEAvancar,
         icon: Icon(Icons.check),
         label: Text('Gerar Relatorio'),
         backgroundColor: Color(0xFF2563EB),
@@ -99,31 +123,35 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _buildPosicaoEditor(int pos) {
-    final dados = producao.posicoes[pos]!;
     return Card(
+      margin: EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: EdgeInsets.all(8),
+        padding: EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Posicao $pos',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Color(0xFF2563EB))),
             SizedBox(height: 8),
             Row(
               children: [
-                SizedBox(width: 120, child: Text('Tempo rompido:')),
+                SizedBox(
+                    width: 100,
+                    child: Text('Tempo rompido:',
+                        style: TextStyle(fontSize: 12))),
                 Expanded(
                   child: TextField(
+                    controller: _tempoControllers[pos],
                     decoration: InputDecoration(
                       isDense: true,
                       border: OutlineInputBorder(),
-                      hintText: dados.tempoRompido.join(', '),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                    onChanged: (value) {
-                      final lista = value.split(',').map((e) => e.trim()).toList();
-                      while (lista.length < 8) lista.add('');
-                      dados.tempoRompido = lista;
-                    },
+                    style: TextStyle(fontSize: 13),
                   ),
                 ),
               ],
@@ -131,19 +159,20 @@ class _ReviewScreenState extends State<ReviewScreen> {
             SizedBox(height: 8),
             Row(
               children: [
-                SizedBox(width: 120, child: Text('Bobinas cheias:')),
+                SizedBox(
+                    width: 100,
+                    child: Text('Bobinas cheias:',
+                        style: TextStyle(fontSize: 12))),
                 Expanded(
                   child: TextField(
+                    controller: _bobinaControllers[pos],
                     decoration: InputDecoration(
                       isDense: true,
                       border: OutlineInputBorder(),
-                      hintText: dados.bobinasCheias.join(', '),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
-                    onChanged: (value) {
-                      final lista = value.split(',').map((e) => e.trim()).toList();
-                      while (lista.length < 8) lista.add('');
-                      dados.bobinasCheias = lista;
-                    },
+                    style: TextStyle(fontSize: 13),
                   ),
                 ),
               ],
