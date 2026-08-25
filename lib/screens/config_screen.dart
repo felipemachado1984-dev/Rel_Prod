@@ -68,66 +68,94 @@ class _ConfigScreenState extends State<ConfigScreen> {
         operador: 'Operador',
       );
 
-      // ===== PARSER LINHA POR LINHA =====
-      // O OCR le a tabela linha por linha (esquerda -> direita, cima -> baixo)
-      // Cada linha da tabela tem: [numero_da_posicao] [t1_tempo] [t1_bobina] [t2_tempo] [t2_bobina] ... [t8_tempo] [t8_bobina]
-      // O numero da posicao (1-6) precisa ser removido dos dados
+      // ===== PARSER: filtra rotulos e mapeia por turno =====
+      // Estrutura da tabela (cada linha = 1 turno):
+      // [turno_label] [P1tempo P1bob] [P2tempo P2bob] ... [P6tempo P6bob]
+      // = 1 rotulo + 12 dados = 13 numeros por linha
+      // Ou sem rotulo: 12 numeros por linha
 
-      int posicaoAtual = 0;
-      List<String> dadosAcumulados = [];
+      final cleanNums = <String>[];
 
       for (final block in res.blocks) {
         for (final line in block.lines) {
-          final nums = RegExp(r'\d+')
+          final lineNums = RegExp(r'\d+')
               .allMatches(line.text)
               .map((m) => m.group(0)!)
               .toList();
 
-          if (nums.isEmpty) continue;
+          if (lineNums.isEmpty) continue;
 
-          // Verifica se o primeiro numero e um rotulo de posicao (1-6)
-          final primeiro = int.tryParse(nums[0]);
-
-          if (primeiro != null && primeiro >= 1 && primeiro <= 6) {
-            // Se ja estava acumulando dados da posicao anterior, salva
-            if (posicaoAtual >= 1 && dadosAcumulados.isNotEmpty) {
-              _atribuirDados(prod, posicaoAtual, dadosAcumulados);
+          // Se a linha tem 13 numeros e o primeiro e 1-8, remove o rotulo de turno
+          if (lineNums.length == 13) {
+            final first = int.tryParse(lineNums[0]);
+            if (first != null && first >= 1 && first <= 8) {
+              cleanNums.addAll(lineNums.sublist(1));
+            } else {
+              cleanNums.addAll(lineNums);
             }
-            // Inicia nova posicao
-            posicaoAtual = primeiro;
-            dadosAcumulados = nums.sublist(1); // remove o rotulo
-          } else if (posicaoAtual >= 1) {
-            // Continuacao da linha atual (OCR quebrou a linha)
-            dadosAcumulados.addAll(nums);
+          } else if (lineNums.length == 12) {
+            // 12 numeros = dados sem rotulo
+            cleanNums.addAll(lineNums);
+          } else if (lineNums.length > 13) {
+            // Linha mesclada - tenta quebrar em chunks de 12
+            // Primeiro remove o rotulo se existir
+            int start = 0;
+            final first = int.tryParse(lineNums[0]);
+            if (first != null && first >= 1 && first <= 8) {
+              start = 1;
+            }
+            // Pega de 12 em 12
+            for (int i = start; i + 12 <= lineNums.length; i += 12) {
+              cleanNums.addAll(lineNums.sublist(i, i + 12));
+            }
+            // Sobra
+            final remaining = (lineNums.length - start) % 12;
+            if (remaining > 0) {
+              final offset = lineNums.length - remaining;
+              cleanNums.addAll(lineNums.sublist(offset));
+            }
+          } else if (lineNums.length >= 10) {
+            // Linha quase completa, adiciona
+            cleanNums.addAll(lineNums);
+          } else if (lineNums.length <= 4 && cleanNums.isNotEmpty) {
+            // Linha curta - pode ser rotulo de posicao ou cabecalho
+            // So adiciona se for continuacao de dados
+            final first = int.tryParse(lineNums[0]);
+            if (first != null && first >= 1 && first <= 6 && lineNums.length == 1) {
+              // Rotulo de posicao isolado - ignora
+            } else {
+              cleanNums.addAll(lineNums);
+            }
+          } else {
+            cleanNums.addAll(lineNums);
           }
-          // Se posicaoAtual == 0, e cabecalho - ignora
         }
       }
 
-      // Salva a ultima posicao
-      if (posicaoAtual >= 1 && dadosAcumulados.isNotEmpty) {
-        _atribuirDados(prod, posicaoAtual, dadosAcumulados);
-      }
-
-      // Fallback: se nao detectou posicoes, joga em sequencia
-      if (prod.posicoes.isEmpty) {
-        final allNums = res.allNumbers;
-        for (int pos = 1; pos <= 6; pos++) {
-          final tempo = List<String>.filled(8, '');
-          final bob = List<String>.filled(8, '');
-          for (int t = 0; t < 8; t++) {
-            int i = t * 12 + (pos - 1) * 2;
-            if (i < allNums.length) tempo[t] = allNums[i];
-            if (i + 1 < allNums.length) bob[t] = allNums[i + 1];
-          }
-          prod.posicoes[pos] = PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
+      // Se cleanNums tem mais de 96, trunca
+      // Se tem menos, usa o que tem
+      // Mapeia: turno * 12 + (pos-1) * 2
+      for (int pos = 1; pos <= 6; pos++) {
+        final tempo = List<String>.filled(8, '');
+        final bob = List<String>.filled(8, '');
+        for (int turno = 0; turno < 8; turno++) {
+          int i = turno * 12 + (pos - 1) * 2;
+          if (i < cleanNums.length) tempo[turno] = cleanNums[i];
+          if (i + 1 < cleanNums.length) bob[turno] = cleanNums[i + 1];
         }
+        prod.posicoes[pos] =
+            PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
       }
 
+      // Debug info: passa a lista de numeros extraidos pra tela de revisao
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (c) => ReviewScreen(producao: prod, rawText: res.rawText),
+          builder: (c) => ReviewScreen(
+            producao: prod,
+            rawText: res.rawText,
+            debugNums: cleanNums,
+          ),
         ),
       );
     } catch (e) {
@@ -137,23 +165,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  void _atribuirDados(Producao prod, int posicao, List<String> dados) {
-    final tempo = List<String>.filled(8, '');
-    final bobinas = List<String>.filled(8, '');
-
-    // Os dados vem em pares: tempo, bobina, tempo, bobina...
-    for (int t = 0; t < 8; t++) {
-      int i = t * 2;
-      if (i < dados.length) tempo[t] = dados[i];
-      if (i + 1 < dados.length) bobinas[t] = dados[i + 1];
-    }
-
-    prod.posicoes[posicao] = PosicaoData(
-      tempoRompido: tempo,
-      bobinasCheias: bobinas,
-    );
   }
 
   @override
