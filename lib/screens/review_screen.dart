@@ -5,8 +5,13 @@ import 'report_screen.dart';
 class ReviewScreen extends StatefulWidget {
   final Producao producao;
   final String rawText;
+  final List<String> debugNums;
 
-  ReviewScreen({required this.producao, this.rawText = ''});
+  ReviewScreen({
+    required this.producao,
+    this.rawText = '',
+    this.debugNums = const [],
+  });
 
   @override
   _ReviewScreenState createState() => _ReviewScreenState();
@@ -89,9 +94,51 @@ class _ReviewScreenState extends State<ReviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ===== DEBUG =====
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber[400]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('DEBUG: ${widget.debugNums.length} numeros extraidos',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  SizedBox(height: 4),
+                  Text('Esperado: 96 (8 turnos x 6 pos x 2 valores)',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+                  SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [
+                      for (int i = 0; i < widget.debugNums.length; i++)
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Text(
+                            '$i:${widget.debugNums[i]}',
+                            style: TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 8),
             ExpansionTile(
-              title: Text('Texto reconhecido pelo OCR',
+              title: Text('Texto OCR (bruto)',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              initiallyExpanded: false,
               children: [
                 Container(
                   width: double.infinity,
@@ -102,7 +149,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   ),
                   child: TextField(
                     controller: _rawTextController,
-                    maxLines: 10,
+                    maxLines: 12,
                     decoration: InputDecoration(border: InputBorder.none),
                     style: TextStyle(fontSize: 11, fontFamily: 'monospace'),
                   ),
@@ -138,10 +185,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     fontSize: 15,
                     color: Color(0xFF2563EB))),
             SizedBox(height: 8),
-            // Cabecalho da tabela
             Row(
               children: [
-                SizedBox(width: 60, child: Text('Turno', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                SizedBox(width: 50, child: Text('Turno', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
                 Expanded(child: Text('Tempo rompido', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
                 Expanded(child: Text('Bobinas cheias', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
               ],
@@ -150,9 +196,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             for (int t = 0; t < 8; t++) ...[
               Row(
                 children: [
-                  SizedBox(
-                      width: 60,
-                      child: Text('${t + 1}', style: TextStyle(fontSize: 12))),
+                  SizedBox(width: 50, child: Text('${t + 1}', style: TextStyle(fontSize: 12))),
                   Expanded(
                     child: Padding(
                       padding: EdgeInsets.only(right: 4),
@@ -161,8 +205,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                         decoration: InputDecoration(
                           isDense: true,
                           border: OutlineInputBorder(),
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                         ),
                         style: TextStyle(fontSize: 12),
                       ),
@@ -174,8 +217,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                       decoration: InputDecoration(
                         isDense: true,
                         border: OutlineInputBorder(),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                       ),
                       style: TextStyle(fontSize: 12),
                     ),
