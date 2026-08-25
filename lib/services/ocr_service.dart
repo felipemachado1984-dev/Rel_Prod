@@ -1,94 +1,35 @@
 import 'dart:io';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:image/image.dart' as img;
-import 'package:path_provider/path_provider.dart';
+
+class OcrResult {
+  final List<String> allNumbers;
+  final String rawText;
+
+  OcrResult({required this.allNumbers, required this.rawText});
+}
 
 class OcrService {
   final TextRecognizer _recognizer =
       TextRecognizer(script: TextRecognitionScript.latin);
 
-  Future<Map<String, List<String>>> extrairValores(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    final image = img.decodeImage(bytes)!;
+  Future<OcrResult> extrairValores(String imagePath) async {
+    final inputImage = InputImage.fromFilePath(imagePath);
+    final result = await _recognizer.processImage(inputImage);
 
-    final imgW = image.width;
-    final imgH = image.height;
+    final rawText = result.text;
+    final allNumbers = <String>[];
 
-    const baseY = 0.35;
-    const espacamentoY = 0.075;
-    const offsetBobinas = 0.035;
-    const colunasX = [0.15, 0.21, 0.27, 0.33, 0.45, 0.51, 0.57, 0.63];
-    const larguraCol = 0.055;
-    const alturaCampo = 0.028;
-
-    final resultado = <String, List<String>>{};
-
-    final tempDir = await getTemporaryDirectory();
-
-    for (int pos = 1; pos <= 6; pos++) {
-      final y = baseY + espacamentoY * (pos - 1);
-
-      final tempoValores = <String>[];
-      for (int col = 0; col < 8; col++) {
-        final valor = await _reconhecerRegiao(
-          image, imgW, imgH,
-          colunasX[col], y, larguraCol, alturaCampo, tempDir,
-        );
-        tempoValores.add(valor);
-      }
-      resultado['pos${pos}_tempo'] = tempoValores;
-
-      final bobinasValores = <String>[];
-      for (int col = 0; col < 8; col++) {
-        final valor = await _reconhecerRegiao(
-          image, imgW, imgH,
-          colunasX[col], y + offsetBobinas, larguraCol, alturaCampo, tempDir,
-        );
-        bobinasValores.add(valor);
-      }
-      resultado['pos${pos}_bobinas'] = bobinasValores;
-    }
-
-    return resultado;
-  }
-
-  Future<String> _reconhecerRegiao(
-    img.Image fullImage, int imgW, int imgH,
-    double xPercent, double yPercent, double wPercent, double hPercent,
-    Directory tempDir,
-  ) async {
-    const margin = 8;
-
-    final sx = (xPercent * imgW - margin).clamp(0, imgW).toInt();
-    final sy = (yPercent * imgH - margin).clamp(0, imgH).toInt();
-    final sw = (wPercent * imgW + margin * 2).clamp(1, imgW - sx).toInt();
-    final sh = (hPercent * imgH + margin * 2).clamp(1, imgH - sy).toInt();
-
-    final cropped = img.copyCrop(
-      fullImage, x: sx, y: sy, width: sw, height: sh,
-    );
-
-    final upscaled = img.copyResize(cropped, width: sw * 3, height: sh * 3);
-
-    final tempPath = '${tempDir.path}/crop_${DateTime.now().millisecondsSinceEpoch}.png';
-    final tempFile = File(tempPath);
-    await tempFile.writeAsBytes(img.encodePng(upscaled));
-
-    try {
-      final inputImage = InputImage.fromFilePath(tempPath);
-      final result = await _recognizer.processImage(inputImage);
-
-      final texto = result.text.trim();
-      final numeros = texto.replaceAll(RegExp(r'[^0-9]'), '');
-
-      return numeros;
-    } catch (e) {
-      return '';
-    } finally {
-      if (await tempFile.exists()) {
-        await tempFile.delete();
+    for (final block in result.blocks) {
+      for (final line in block.lines) {
+        final lineText = line.text.trim();
+        final numbers = RegExp(r'\d+').allMatches(lineText);
+        for (final match in numbers) {
+          allNumbers.add(match.group(0)!);
+        }
       }
     }
+
+    return OcrResult(allNumbers: allNumbers, rawText: rawText);
   }
 
   void dispose() {
