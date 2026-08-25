@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../models/producao.dart';
 import '../services/ocr_service.dart';
+import '../services/parser_service.dart';
 import '../widgets/ocr_overlay.dart';
+import 'camera_helper.dart';
 import 'review_screen.dart';
 import 'crop_screen.dart';
 
@@ -69,87 +71,31 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     _isDetecting = true;
     try {
-      final rotation = InputImageRotation.values.firstWhere(
-        (r) => r.rawValue == (_camDesc?.sensorOrientation ?? 0),
-        orElse: () => InputImageRotation.rotation0deg,
-      );
-
-      if (rotation == InputImageRotation.rotation90deg ||
-          rotation == InputImageRotation.rotation270deg) {
-        _rotatedSize = Size(image.height.toDouble(), image.width.toDouble());
-      } else {
-        _rotatedSize = Size(image.width.toDouble(), image.height.toDouble());
-      }
-
-      final inputImage = InputImage.fromBytes(
-        bytes: image.planes[0].bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: InputImageFormat.nv21,
-          bytesPerRow: image.planes[0].bytesPerRow,
-        ),
-      );
+      _rotatedSize = CameraHelper.getRotatedSize(image, _camDesc);
+      final inputImage = CameraHelper.toInputImage(image, _camDesc);
+      if (inputImage == null) return;
 
       final result = await _recognizer.processImage(inputImage);
+      final fr = CameraHelper.processFrame(
+          result, _rotatedSize, _screenSize, boxSize);
 
-      // === Calcular a caixa 332x332 no espaco da imagem ===
-      final sx = _screenSize.width / _rotatedSize.width;
-      final sy = _screenSize.height / _rotatedSize.height;
-      final scale = sx > sy ? sx : sy;
-
-      final rw = _rotatedSize.width * scale;
-      final rh = _rotatedSize.height * scale;
-      final ox = (_screenSize.width - rw) / 2;
-      final oy = (_screenSize.height - rh) / 2;
-
-      // Caixa na tela (centralizada)
-      final screenBoxLeft = (_screenSize.width - boxSize) / 2;
-      final screenBoxTop = (_screenSize.height - boxSize) / 2;
-      final screenBoxRight = screenBoxLeft + boxSize;
-      final screenBoxBottom = screenBoxTop + boxSize;
-
-      // Converter para coordenadas da imagem
-      final imgBoxLeft = (screenBoxLeft - ox) / scale;
-      final imgBoxTop = (screenBoxTop - oy) / scale;
-      final imgBoxRight = (screenBoxRight - ox) / scale;
-      final imgBoxBottom = (screenBoxBottom - oy) / scale;
-
-      int count = 0;
       final newOverlays = <OcrLineData>[];
-
-      for (final block in result.blocks) {
-        for (final line in block.lines) {
-          final nums = RegExp(r'\d+').allMatches(line.text).length;
-          if (nums == 0) continue;
-
-          // Centro da linha OCR
-          final cx = (line.boundingBox.left + line.boundingBox.right) / 2;
-          final cy = (line.boundingBox.top + line.boundingBox.bottom) / 2;
-
-          // Verifica se o centro esta dentro da caixa
-          if (cx >= imgBoxLeft && cx <= imgBoxRight &&
-              cy >= imgBoxTop && cy <= imgBoxBottom) {
-            count += nums;
-            newOverlays.add(OcrLineData(line.boundingBox, line.text));
-          }
-        }
+      for (int i = 0; i < fr.boxes.length; i++) {
+        newOverlays.add(OcrLineData(fr.boxes[i], fr.texts[i]));
       }
 
       if (mounted) {
         setState(() {
-          _numDetected = count;
+          _numDetected = fr.numDetected;
           _overlays = newOverlays;
         });
 
-        // AUTO-CAPTURA: exatamente 48 dentro da caixa
-        if (count == 48 && !_autoCaptureDone && !_busy) {
+        if (fr.numDetected == 48 && !_autoCaptureDone && !_busy) {
           _autoCaptureDone = true;
           _foto();
         }
       }
     } catch (e) {
-      // ignora
     } finally {
       _isDetecting = false;
     }
@@ -201,51 +147,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final res = await _ocr.extrairValores(cropped);
       if (!mounted) return;
 
-      final prod = Producao(
-        maquina: '1',
-        data: DateTime.now().toString().substring(0, 10),
-        operador: '',
-      );
-
-      final cleanNums = <String>[];
-      for (final block in res.blocks) {
-        for (final line in block.lines) {
-          final lineNums = RegExp(r'\d+')
-              .allMatches(line.text)
-              .map((m) => m.group(0)!)
-              .toList();
-          if (lineNums.isEmpty) continue;
-
-          if (lineNums.length >= 12) {
-            final first = int.tryParse(lineNums[0]);
-            if (first != null && first >= 1 && first <= 4 && lineNums.length == 13) {
-              cleanNums.addAll(lineNums.sublist(1));
-            } else {
-              cleanNums.addAll(lineNums);
-            }
-          } else if (lineNums.length >= 6) {
-            cleanNums.addAll(lineNums);
-          } else if (lineNums.length <= 2 && cleanNums.isNotEmpty) {
-            final first = int.tryParse(lineNums[0]);
-            if (!(lineNums.length == 1 && first != null && first >= 1 && first <= 6)) {
-              cleanNums.addAll(lineNums);
-            }
-          } else {
-            cleanNums.addAll(lineNums);
-          }
-        }
-      }
-
-      for (int pos = 1; pos <= 6; pos++) {
-        final tempo = List<String>.filled(4, '');
-        final bob = List<String>.filled(4, '');
-        for (int turno = 0; turno < 4; turno++) {
-          int i = turno * 12 + (pos - 1) * 2;
-          if (i < cleanNums.length) tempo[turno] = cleanNums[i];
-          if (i + 1 < cleanNums.length) bob[turno] = cleanNums[i + 1];
-        }
-        prod.posicoes[pos] = PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
-      }
+      final prod = ParserService.parse(res);
 
       Navigator.pushReplacement(
         context,
@@ -253,7 +155,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           builder: (c) => ReviewScreen(
             producao: prod,
             rawText: res.rawText,
-            debugNums: cleanNums,
+            debugNums: res.allNumbers,
           ),
         ),
       );
@@ -262,9 +164,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         SnackBar(content: Text('Erro: $e')),
       );
     } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -286,8 +186,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 return Stack(
                   children: [
                     Positioned.fill(child: CameraPreview(_cam)),
-
-                    // Overlay estilo Google Lens + Caixa guia
                     Positioned.fill(
                       child: CustomPaint(
                         painter: OcrOverlayPainter(
@@ -299,8 +197,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         child: Container(),
                       ),
                     ),
-
-                    // Badge de contagem
                     Positioned(
                       top: 16,
                       left: 16,
@@ -343,8 +239,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         ),
                       ),
                     ),
-
-                    // Dica
                     Positioned(
                       bottom: 100,
                       left: 16,
@@ -364,6 +258,47 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         ),
                       ),
                     ),
-
                     if (_busy)
-                      
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.black54,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(color: Colors.white),
+                                SizedBox(height: 12),
+                                Text('Processando...',
+                                    style: TextStyle(color: Colors.white, fontSize: 16)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(16),
+          color: Color(0xFF1E3A5F),
+          child: ElevatedButton.icon(
+            onPressed: (_busy || pronto) ? null : _foto,
+            icon: Icon(Icons.camera_alt),
+            label: Text(
+              pronto ? 'Capturando automaticamente...' : 'Tirar Foto Manual',
+              style: TextStyle(fontSize: 16),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
