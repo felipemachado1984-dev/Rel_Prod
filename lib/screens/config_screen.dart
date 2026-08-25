@@ -1,11 +1,10 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:image/image.dart' as img;
 import '../models/producao.dart';
 import '../services/ocr_service.dart';
 import 'review_screen.dart';
+import 'crop_screen.dart';
 
 class ConfigScreen extends StatefulWidget {
   @override
@@ -13,100 +12,124 @@ class ConfigScreen extends StatefulWidget {
 }
 
 class _ConfigScreenState extends State<ConfigScreen> {
-  late CameraController _cameraController;
-  late Future<void> _initializeControllerFuture;
-  final OcrService _ocrService = OcrService();
-  bool _isProcessing = false;
-  bool _cameraReady = false;
+  late CameraController _cam;
+  late Future<void> _initFuture;
+  final OcrService _ocr = OcrService();
+  bool _busy = false;
+  bool _ready = false;
 
   @override
   void initState() {
     super.initState();
-    _initCamera();
+    _startCam();
   }
 
-  Future<void> _initCamera() async {
-    final cameras = await availableCameras();
-    if (cameras.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nenhuma camera encontrada')),
-      );
-      return;
-    }
-
-    final backCamera = cameras.firstWhere(
+  Future<void> _startCam() async {
+    final cams = await availableCameras();
+    if (cams.isEmpty) return;
+    final back = cams.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.back,
-      orElse: () => cameras.first,
+      orElse: () => cams.first,
     );
-
-    _cameraController = CameraController(
-      backCamera,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-
-    _initializeControllerFuture = _cameraController.initialize();
-    await _initializeControllerFuture;
-
-    if (mounted) {
-      setState(() {
-        _cameraReady = true;
-      });
-    }
+    _cam = CameraController(back, ResolutionPreset.high, enableAudio: false);
+    _initFuture = _cam.initialize();
+    await _initFuture;
+    if (mounted) setState(() => _ready = true);
   }
 
   @override
   void dispose() {
-    _cameraController.dispose();
-    _ocrService.dispose();
+    _cam.dispose();
+    _ocr.dispose();
     super.dispose();
   }
 
-  Future<void> _tirarFotoEProcessar() async {
-    if (_isProcessing) return;
-
-    setState(() {
-      _isProcessing = true;
-    });
-
+  Future<void> _foto() async {
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
-      await _initializeControllerFuture;
-      final XFile foto = await _cameraController.takePicture();
-
+      await _initFuture;
+      final XFile f = await _cam.takePicture();
       if (!mounted) return;
-
-      final croppedPath = await Navigator.push<String>(
+      final cropped = await Navigator.push<String>(
         context,
-        MaterialPageRoute(
-          builder: (context) => CropScreen(imagePath: foto.path),
-        ),
+        MaterialPageRoute(builder: (c) => CropScreen(imagePath: f.path)),
       );
-
-      if (croppedPath == null) {
-        setState(() {
-          _isProcessing = false;
-        });
+      if (cropped == null) {
+        setState(() => _busy = false);
         return;
       }
-
-      final resultado = await _ocrService.extrairValores(croppedPath);
-
+      final res = await _ocr.extrairValores(cropped);
       if (!mounted) return;
-
-      final nums = resultado.allNumbers;
-
-      final producao = Producao(
+      final nums = res.allNumbers;
+      final prod = Producao(
         maquina: '1',
         data: DateTime.now().toString().substring(0, 10),
         operador: 'Operador',
       );
+      for (int pos = 1; pos <= 6; pos++) {
+        final tempo = List<String>.filled(8, '');
+        final bob = List<String>.filled(8, '');
+        for (int turno = 0; turno < 8; turno++) {
+          int i = turno * 12 + (pos - 1) * 2;
+          if (i < nums.length) tempo[turno] = nums[i];
+          if (i + 1 < nums.length) bob[turno] = nums[i + 1];
+        }
+        prod.posicoes[pos] = PosicaoData(tempoRompido: tempo, bobinasCheias: bob);
+      }
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (c) => ReviewScreen(producao: prod, rawText: res.rawText),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-      // PARSER: os numeros vem em pares sequenciais
-      // Par 1 -> Posicao 1 Turno 1 (tempo, bobina)
-      // Par 2 -> Posicao 2 Turno 1
-      // ...ate Posicao 6 Turno 1
-      // Par 7 -> Posicao 1 Turno 2
-      // ...ate Posicao 6 Turno 8
-      // Total: 48 pares = 96 numeros (6 posicoes x 8 turnos x 2 valores)
-
-      for (int pos = 1; pos <=
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Capturar Relatorio'),
+        backgroundColor: Color(0xFF2563EB),
+        foregroundColor: Colors.white,
+      ),
+      body: !_ready
+          ? Center(child: CircularProgressIndicator())
+          : Column(children: [
+              Expanded(child: CameraPreview(_cam)),
+              if (_busy)
+                Container(
+                  padding: EdgeInsets.all(16),
+                  color: Colors.black54,
+                  child: Column(children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 8),
+                    Text('Processando...', style: TextStyle(color: Colors.white)),
+                  ]),
+                ),
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(16),
+                color: Color(0xFF1E3A5F),
+                child: ElevatedButton.icon(
+                  onPressed: _busy ? null : _foto,
+                  icon: Icon(Icons.camera_alt),
+                  label: Text('Tirar Foto'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ]),
+    );
+  }
+}
