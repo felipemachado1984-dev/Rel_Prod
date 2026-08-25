@@ -22,6 +22,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _busy = false;
   bool _ready = false;
   bool _isDetecting = false;
+  bool _autoCaptureDone = false;
   int _numDetected = 0;
   CameraDescription? _camDesc;
   int _lastProcessTime = 0;
@@ -57,7 +58,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    if (_isDetecting || _busy) return;
+    if (_isDetecting || _busy || _autoCaptureDone) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastProcessTime < 700) return;
@@ -70,7 +71,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
         orElse: () => InputImageRotation.rotation0deg,
       );
 
-      // Calcula tamanho rotacionado
       if (rotation == InputImageRotation.rotation90deg ||
           rotation == InputImageRotation.rotation270deg) {
         _rotatedSize = Size(image.height.toDouble(), image.width.toDouble());
@@ -108,6 +108,12 @@ class _ConfigScreenState extends State<ConfigScreen> {
           _numDetected = count;
           _overlays = newOverlays;
         });
+
+        // AUTO-CAPTURA: exatamente 48 numeros -> tira foto sozinho
+        if (count == 48 && !_autoCaptureDone && !_busy) {
+          _autoCaptureDone = true;
+          _foto();
+        }
       }
     } catch (e) {
       // ignora
@@ -136,7 +142,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final XFile f = await _cam.takePicture();
       if (!mounted) return;
 
-      final pronto = _numDetected >= 48;
+      final pronto = _numDetected == 48;
       String? cropped;
 
       if (pronto) {
@@ -150,7 +156,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
       if (cropped == null) {
         if (mounted) {
-          setState(() => _busy = false);
+          setState(() {
+            _busy = false;
+            _autoCaptureDone = false;
+          });
           _cam.startImageStream(_processFrame);
         }
         return;
@@ -222,16 +231,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
     } finally {
       if (mounted) {
         setState(() => _busy = false);
-        try {
-          _cam.startImageStream(_processFrame);
-        } catch (e) {}
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final pronto = _numDetected >= 48;
+    final pronto = _numDetected == 48;
 
     return Scaffold(
       appBar: AppBar(
@@ -243,10 +249,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ? Center(child: CircularProgressIndicator())
           : Stack(
               children: [
-                // Camera
                 Positioned.fill(child: CameraPreview(_cam)),
 
-                // Overlay com os numeros reconhecidos (estilo Google Lens)
+                // Overlay estilo Google Lens
                 Positioned.fill(
                   child: CustomPaint(
                     painter: OcrOverlayPainter(
@@ -289,7 +294,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         SizedBox(width: 10),
                         Text(
                           pronto
-                              ? 'PRONTO! $_numDetected numeros'
+                              ? 'PRONTO! 48 numeros - capturando...'
                               : '$_numDetected de 48 numeros',
                           style: TextStyle(
                             color: Colors.white,
@@ -315,8 +320,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     ),
                     child: Text(
                       pronto
-                          ? 'Foto pronta! Vai direto para a revisao.'
-                          : 'Aproxime a camera ate detectar 48 numeros.',
+                          ? 'Captura automatica! Aguarde...'
+                          : _numDetected > 48
+                              ? 'Mais de 48 numeros detectados. Afaste um pouco a camera.'
+                              : 'Aponte para o relatorio. A foto sera tirada automaticamente quando detectar 48 numeros.',
                       style: TextStyle(color: Colors.white, fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
@@ -348,14 +355,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
           padding: EdgeInsets.all(16),
           color: Color(0xFF1E3A5F),
           child: ElevatedButton.icon(
-            onPressed: _busy ? null : _foto,
-            icon: Icon(pronto ? Icons.check : Icons.camera_alt),
+            onPressed: (_busy || pronto) ? null : _foto,
+            icon: Icon(Icons.camera_alt),
             label: Text(
-              pronto ? 'Tirar Foto (Pronto!)' : 'Tirar Foto',
+              pronto ? 'Capturando automaticamente...' : 'Tirar Foto Manual',
               style: TextStyle(fontSize: 16),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: pronto ? Colors.green : Color(0xFF2563EB),
+              backgroundColor: Color(0xFF2563EB),
               foregroundColor: Colors.white,
               padding: EdgeInsets.symmetric(vertical: 16),
             ),
